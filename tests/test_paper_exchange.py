@@ -4,7 +4,7 @@ from crypto_agent.exchange.paper import PaperExchange
 
 @pytest.fixture
 def paper():
-    return PaperExchange(initial_balance={"USDT": 10000.0})
+    return PaperExchange(exchange_id="gateio", initial_balance={"USDT": 10000.0})
 
 
 @pytest.mark.asyncio
