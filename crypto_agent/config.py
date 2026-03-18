@@ -10,9 +10,10 @@ if os.getenv("ANTHROPIC_BASE_URL"):
 
 @dataclass
 class Config:
-    anthropic_api_key: str = field(default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
-    anthropic_base_url: str = field(default_factory=lambda: os.getenv("ANTHROPIC_BASE_URL", ""))
-    model_id: str = field(default_factory=lambda: os.environ.get("MODEL_ID", "claude-sonnet-4-6"))
+    llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openai"))
+    api_key: str = field(default_factory=lambda: os.getenv("API_KEY", os.getenv("OPENAI_API_KEY", os.getenv("ANTHROPIC_API_KEY", ""))))
+    api_base_url: str = field(default_factory=lambda: os.getenv("API_BASE_URL", os.getenv("OPENAI_BASE_URL", os.getenv("ANTHROPIC_BASE_URL", ""))))
+    model_id: str = field(default_factory=lambda: os.getenv("MODEL_ID", "gpt-5.4-mini"))
     default_exchange: str = field(default_factory=lambda: os.getenv("DEFAULT_EXCHANGE", "gateio"))
     paper_trading: bool = field(default_factory=lambda: os.getenv("PAPER_TRADING", "true").lower() == "true")
     initial_balance: dict = field(default_factory=lambda: {"USDT": float(os.getenv("INITIAL_BALANCE_USDT", "10000"))})

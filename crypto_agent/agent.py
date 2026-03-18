@@ -1,5 +1,4 @@
-import asyncio
-from anthropic import Anthropic
+import json
 from .config import config
 from .exchange.paper import PaperExchange
 from .exchange.live import LiveExchange
@@ -21,15 +20,43 @@ Symbols use format: BTC/USDT, ETH/USDT, SOL/USDT etc.
 """
 
 
+def _openai_tools() -> list[dict]:
+    """Convert Anthropic-style tool definitions to OpenAI function calling format."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        }
+        for t in TOOL_DEFINITIONS
+    ]
+
+
 class CryptoAgent:
     def __init__(self):
-        self.client = Anthropic(base_url=config.anthropic_base_url or None)
         self.exchange = (
             PaperExchange(config.default_exchange, config.initial_balance)
             if config.paper_trading
             else LiveExchange(config.default_exchange)
         )
         self.messages: list = []
+        self.provider = config.llm_provider
+
+        if self.provider == "openai":
+            from openai import OpenAI
+            self.client = OpenAI(
+                api_key=config.api_key,
+                base_url=config.api_base_url or None,
+            )
+        else:
+            from anthropic import Anthropic
+            self.client = Anthropic(
+                api_key=config.api_key,
+                base_url=config.api_base_url or None,
+            )
 
     async def _dispatch_tool(self, name: str, inputs: dict) -> str:
         handler = TOOL_HANDLERS.get(name)
@@ -42,6 +69,46 @@ class CryptoAgent:
     async def chat(self, user_message: str) -> str:
         self.messages.append({"role": "user", "content": user_message})
 
+        if self.provider == "openai":
+            return await self._chat_openai()
+        return await self._chat_anthropic()
+
+    async def _chat_openai(self) -> str:
+        tools = _openai_tools()
+        while True:
+            response = self.client.chat.completions.create(
+                model=config.model_id,
+                messages=[{"role": "system", "content": SYSTEM}] + self.messages,
+                tools=tools,
+                max_tokens=4096,
+            )
+            choice = response.choices[0]
+            msg = choice.message
+
+            if not msg.tool_calls:
+                self.messages.append({"role": "assistant", "content": msg.content or ""})
+                return msg.content or ""
+
+            self.messages.append({
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in msg.tool_calls
+                ],
+            })
+
+            for tc in msg.tool_calls:
+                args = json.loads(tc.function.arguments)
+                output = await self._dispatch_tool(tc.function.name, args)
+                self.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": output,
+                })
+
+    async def _chat_anthropic(self) -> str:
         while True:
             response = self.client.messages.create(
                 model=config.model_id,
