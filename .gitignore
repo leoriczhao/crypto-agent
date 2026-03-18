@@ -11,3 +11,5 @@ build/
 .mypy_cache/
 *.db
 *.sqlite3
+*.egg-info/
+.pytest_cache/
