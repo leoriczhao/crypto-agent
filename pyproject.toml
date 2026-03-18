@@ -17,3 +17,9 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
 ]
+
+[tool.uv]
+package = true
+
+[project.scripts]
+crypto-agent = "crypto_agent.cli:run"
