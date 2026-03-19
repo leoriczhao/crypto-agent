@@ -22,3 +22,9 @@ class BaseExchange(ABC):
 
     @abstractmethod
     async def fetch_open_orders(self, symbol: str | None = None) -> list[dict]: ...
+
+    @abstractmethod
+    async def fetch_positions(self) -> dict: ...
+
+    @abstractmethod
+    async def close(self): ...

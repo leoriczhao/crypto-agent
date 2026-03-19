@@ -39,5 +39,33 @@ class LiveExchange(BaseExchange):
         orders = await self.exchange.fetch_open_orders(symbol)
         return [{"id": o["id"], "symbol": o["symbol"], "side": o["side"], "type": o["type"], "amount": o["amount"], "price": o["price"]} for o in orders]
 
+    async def fetch_positions(self) -> dict:
+        try:
+            positions = await self.exchange.fetch_positions()
+        except Exception:
+            return {}
+        result = {}
+        for p in positions:
+            contracts = float(p.get("contracts", 0))
+            if contracts == 0:
+                continue
+            symbol = p.get("symbol", "")
+            entry = float(p.get("entryPrice", 0))
+            mark = float(p.get("markPrice", 0)) or float(p.get("lastPrice", 0))
+            notional = float(p.get("notional", 0))
+            pnl = float(p.get("unrealizedPnl", 0))
+            result[symbol] = {
+                "symbol": symbol,
+                "side": p.get("side", "long"),
+                "contracts": contracts,
+                "amount": notional,
+                "avg_entry_price": entry,
+                "current_price": mark,
+                "unrealized_pnl": round(pnl, 2),
+                "leverage": p.get("leverage"),
+                "margin_mode": p.get("marginMode"),
+            }
+        return result
+
     async def close(self):
         await self.exchange.close()

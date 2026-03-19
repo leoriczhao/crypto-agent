@@ -31,17 +31,22 @@ async def handle_portfolio(exchange, action: str, **_) -> str:
             return "\n".join(lines)
 
         elif action == "positions":
-            if not hasattr(exchange, "fetch_positions"):
-                return "Position tracking only available in paper trading mode."
             positions = await exchange.fetch_positions()
             if not positions:
                 return "No open positions."
-            lines = ["Symbol      | Amount       | Entry Price  | Current      | PnL"]
-            lines.append("-" * 70)
+            lines = ["Symbol           | Side   | Size         | Entry        | Mark         | PnL"]
+            lines.append("-" * 85)
             for sym, pos in positions.items():
+                side = pos.get("side", "long").upper()
+                size = pos.get("contracts", pos.get("amount", 0))
+                entry = pos.get("avg_entry_price", 0)
+                mark = pos.get("current_price", 0)
+                pnl = pos.get("unrealized_pnl", 0)
+                leverage = pos.get("leverage")
+                lev_str = f" {leverage}x" if leverage else ""
                 lines.append(
-                    f"{sym:<11} | {pos['amount']:>12.6f} | {pos['avg_entry_price']:>12.2f} | "
-                    f"{pos.get('current_price', 0):>12.2f} | {pos.get('unrealized_pnl', 0):>+10.2f}"
+                    f"{sym:<16} | {side:<6} | {size:>12.4f} | {entry:>12.2f} | "
+                    f"{mark:>12.2f} | {pnl:>+10.2f}{lev_str}"
                 )
             return "\n".join(lines)
 
@@ -51,7 +56,10 @@ async def handle_portfolio(exchange, action: str, **_) -> str:
                 if not orders:
                     return "No order history."
                 return json.dumps(orders, indent=2)
-            return "Order history not available for live exchange."
+            open_orders = await exchange.fetch_open_orders()
+            if not open_orders:
+                return "No open orders."
+            return json.dumps(open_orders, indent=2)
 
         return f"Unknown action: {action}"
     except Exception as e:
