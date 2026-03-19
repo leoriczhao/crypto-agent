@@ -12,3 +12,4 @@ build/
 *.db
 *.sqlite3
 .worktrees/
+.transcripts/
