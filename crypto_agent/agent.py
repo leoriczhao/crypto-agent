@@ -3,7 +3,7 @@ from .config import config
 from .exchange.paper import PaperExchange
 from .exchange.live import LiveExchange
 from .tools.registry import TOOL_DEFINITIONS, TOOL_HANDLERS
-from .tools import market_data, execute_trade, portfolio  # noqa: F401
+from .tools import market_data, execute_trade, portfolio, news_feed, strategy, risk_check  # noqa: F401
 
 
 SYSTEM = """You are a cryptocurrency trading assistant.
@@ -13,6 +13,9 @@ Capabilities:
 - Check prices, charts, order books for any crypto pair
 - Execute buy/sell orders (paper trading)
 - Track portfolio, positions, and PnL
+- Fetch crypto news headlines and sentiment analysis
+- Technical analysis with SMA, RSI, Bollinger Bands and trading signals
+- Portfolio risk assessment (exposure, concentration, drawdown)
 
 Always show prices with appropriate precision. When discussing trades, mention the current mode (PAPER/LIVE).
 Be concise. Use tables for data when appropriate.
@@ -62,7 +65,7 @@ class CryptoAgent:
         handler = TOOL_HANDLERS.get(name)
         if not handler:
             return f"Unknown tool: {name}"
-        if name == "execute_trade":
+        if name in ("execute_trade", "risk_check"):
             return await handler(exchange=self.exchange, config=config, **inputs)
         return await handler(exchange=self.exchange, **inputs)
 
