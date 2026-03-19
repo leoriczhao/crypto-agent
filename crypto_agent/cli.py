@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 import asyncio
 from rich.console import Console
 from rich.markdown import Markdown
@@ -20,15 +21,19 @@ async def main():
     try:
         while True:
             try:
-                console.print("[bold green]>> [/]", end="")
-                query = input()
+                sys.stdout.write("\033[32m>> \033[0m")
+                sys.stdout.flush()
+                query = sys.stdin.readline()
+                if not query:
+                    break
+                query = query.rstrip("\n")
             except (EOFError, KeyboardInterrupt):
                 break
             if query.strip().lower() in ("q", "exit", "quit", ""):
                 break
 
-            with console.status("[dim]Thinking...[/dim]"):
-                response = await agent.chat(query)
+            console.print("[dim]Thinking...[/dim]")
+            response = await agent.chat(query)
 
             console.print()
             console.print(Markdown(response))

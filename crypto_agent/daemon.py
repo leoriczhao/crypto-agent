@@ -74,9 +74,12 @@ class CryptoDaemon:
         try:
             while True:
                 try:
+                    import sys
                     def _read_input():
-                        console.print("[bold green]>> [/]", end="")
-                        return input()
+                        sys.stdout.write("\033[32m>> \033[0m")
+                        sys.stdout.flush()
+                        line = sys.stdin.readline()
+                        return line.rstrip("\n") if line else ""
                     query = await asyncio.get_event_loop().run_in_executor(None, _read_input)
                 except (EOFError, KeyboardInterrupt):
                     break
