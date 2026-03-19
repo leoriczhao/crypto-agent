@@ -18,6 +18,10 @@ class Config:
     paper_trading: bool = field(default_factory=lambda: os.getenv("PAPER_TRADING", "true").lower() == "true")
     initial_balance: dict = field(default_factory=lambda: {"USDT": float(os.getenv("INITIAL_BALANCE_USDT", "10000"))})
     max_order_size_usdt: float = field(default_factory=lambda: float(os.getenv("MAX_ORDER_SIZE_USDT", "1000")))
+    heartbeat_interval: int = field(default_factory=lambda: int(os.getenv("HEARTBEAT_INTERVAL", "60")))
+    memory_db_path: str = field(default_factory=lambda: os.getenv("MEMORY_DB_PATH", "crypto_agent.db"))
+    notify_telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    notify_telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
 
 
 config = Config()
