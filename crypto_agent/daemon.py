@@ -60,7 +60,9 @@ class CryptoDaemon:
 
     async def run(self):
         mode = "PAPER" if config.paper_trading else "LIVE"
-        console.print(f"\n[bold cyan]Crypto Agent Daemon[/] [dim]({mode} | {config.default_exchange} | heartbeat: {config.heartbeat_interval}s)[/dim]")
+        exchange_count = len(self.agent.exchange_manager.list())
+        extra = f" + {exchange_count - 1} more" if exchange_count > 1 else ""
+        console.print(f"\n[bold cyan]Crypto Agent Daemon[/] [dim]({mode} | {config.default_exchange}{extra} | heartbeat: {config.heartbeat_interval}s)[/dim]")
         if self.notifier.enabled:
             console.print("[dim]Telegram notifications: enabled[/dim]")
         console.print("[dim]Type message or 'q' to quit. Heartbeat runs in background.[/dim]\n")

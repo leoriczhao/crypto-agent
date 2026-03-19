@@ -11,7 +11,9 @@ console = Console()
 async def main():
     agent = CryptoAgent()
     mode = "PAPER" if config.paper_trading else "LIVE"
-    console.print(f"\n[bold cyan]Crypto Agent[/] [dim]({mode} mode | {config.default_exchange})[/dim]")
+    exchange_count = len(agent.exchange_manager.list())
+    extra = f" + {exchange_count - 1} more" if exchange_count > 1 else ""
+    console.print(f"\n[bold cyan]Crypto Agent[/] [dim]({mode} mode | {config.default_exchange}{extra})[/dim]")
     console.print("[dim]Type your question or 'q' to quit.[/dim]\n")
 
     try:

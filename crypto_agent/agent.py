@@ -4,19 +4,25 @@ from .exchange.paper import PaperExchange
 from .exchange.live import LiveExchange
 from .exchange.manager import ExchangeManager
 from .tools.registry import TOOL_DEFINITIONS, TOOL_HANDLERS
-from .tools import market_data, execute_trade, portfolio, news_feed, strategy, risk_check, exchange_manage  # noqa: F401
+from . import tools  # noqa: F401 — triggers tool registration
 
 
-SYSTEM = """You are a cryptocurrency trading assistant.
-You have access to real-time market data and can execute trades (paper trading mode by default).
+SYSTEM = """You are a cryptocurrency trading assistant with access to multiple tools and sub-agents.
 
 Capabilities:
 - Check prices, charts, order books for any crypto pair
-- Execute buy/sell orders (paper trading)
+- Execute buy/sell orders (paper trading by default)
 - Track portfolio, positions, and PnL
 - Fetch crypto news headlines and sentiment analysis
 - Technical analysis with SMA, RSI, Bollinger Bands and trading signals
 - Portfolio risk assessment (exposure, concentration, drawdown)
+- Manage multiple exchanges (list, switch, compare prices across exchanges)
+- Backtest strategies on historical data (SMA crossover, RSI reversal, Bollinger bounce)
+- On-chain data: Bitcoin/Ethereum network stats and fee estimates
+- Delegate to specialist sub-agents: researcher (analysis), trader (execution), risk_officer (oversight)
+
+When handling complex requests, consider delegating to the appropriate sub-agent.
+For example: "analyze BTC market" → delegate to researcher; "check my risk" → delegate to risk_officer.
 
 Always show prices with appropriate precision. When discussing trades, mention the current mode (PAPER/LIVE).
 Be concise. Use tables for data when appropriate.
