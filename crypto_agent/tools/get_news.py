@@ -40,23 +40,18 @@ def _score_sentiment(title: str) -> tuple[str, int]:
 
 
 @register_tool(
-    name="news_feed",
-    description=(
-        "Crypto news and sentiment analysis.\n"
-        "- headlines: fetch latest crypto news headlines\n"
-        "- sentiment: keyword-based sentiment analysis on recent headlines for a symbol"
-    ),
+    name="get_news",
+    description="Get crypto news headlines with sentiment analysis for a symbol.",
     schema={
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["headlines", "sentiment"]},
-            "symbol": {"type": "string", "description": "Currency symbol, e.g. BTC", "default": "BTC"},
+            "symbol": {"type": "string", "description": "Currency, e.g. BTC", "default": "BTC"},
             "limit": {"type": "integer", "description": "Number of headlines", "default": 5},
         },
-        "required": ["action"],
+        "required": [],
     },
 )
-async def handle_news_feed(exchange, action: str, symbol: str = "BTC", limit: int = 5, **_) -> str:
+async def handle_get_news(exchange, symbol: str = "BTC", limit: int = 5, **_) -> str:
     try:
         try:
             headlines = _fetch_cryptopanic(symbol.upper().split("/")[0], limit)
@@ -66,42 +61,40 @@ async def handle_news_feed(exchange, action: str, symbol: str = "BTC", limit: in
             except Exception:
                 headlines = []
 
-        if action == "headlines":
-            if not headlines:
-                return f"No headlines available for {symbol} at this time."
-            lines = [f"📰 Latest {symbol} headlines:"]
-            for i, h in enumerate(headlines, 1):
-                lines.append(f"{i}. {h['title']}")
-                if h.get("published"):
-                    lines.append(f"   {h['published']}")
-            return "\n".join(lines)
+        if not headlines:
+            return f"No headlines available for {symbol} at this time."
 
-        elif action == "sentiment":
-            if not headlines:
-                return f"No headlines to analyze for {symbol}."
-            scored = []
-            total_pos, total_neg = 0, 0
-            for h in headlines:
-                label, strength = _score_sentiment(h["title"])
-                if label == "positive":
-                    total_pos += strength
-                elif label == "negative":
-                    total_neg += strength
-                scored.append({"title": h["title"], "sentiment": label, "strength": strength})
+        lines = [f"📰 Latest {symbol} headlines:"]
+        for i, h in enumerate(headlines, 1):
+            lines.append(f"{i}. {h['title']}")
+            if h.get("published"):
+                lines.append(f"   {h['published']}")
 
-            if total_pos > total_neg:
-                overall = "BULLISH"
-            elif total_neg > total_pos:
-                overall = "BEARISH"
-            else:
-                overall = "NEUTRAL"
+        lines.append("")
 
-            lines = [f"Sentiment analysis for {symbol}: {overall} (pos={total_pos}, neg={total_neg})", ""]
-            for s in scored:
-                icon = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}[s["sentiment"]]
-                lines.append(f"  {icon} [{s['sentiment']}] {s['title']}")
-            return "\n".join(lines)
+        scored = []
+        total_pos, total_neg = 0, 0
+        for h in headlines:
+            label, strength = _score_sentiment(h["title"])
+            if label == "positive":
+                total_pos += strength
+            elif label == "negative":
+                total_neg += strength
+            scored.append({"title": h["title"], "sentiment": label, "strength": strength})
 
-        return f"Unknown action: {action}"
+        if total_pos > total_neg:
+            overall = "BULLISH"
+        elif total_neg > total_pos:
+            overall = "BEARISH"
+        else:
+            overall = "NEUTRAL"
+
+        lines.append(f"Sentiment: {overall} (pos={total_pos}, neg={total_neg})")
+        lines.append("")
+        for s in scored:
+            icon = {"positive": "🟢", "negative": "🔴", "neutral": "⚪"}[s["sentiment"]]
+            lines.append(f"  {icon} [{s['sentiment']}] {s['title']}")
+
+        return "\n".join(lines)
     except Exception as e:
-        return f"Error in news_feed: {e}"
+        return f"Error in get_news: {e}"

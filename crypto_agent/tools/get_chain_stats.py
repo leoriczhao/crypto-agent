@@ -26,40 +26,10 @@ def _format_number(n: float) -> str:
     return f"{n:.0f}"
 
 
-@register_tool(
-    name="chain_data",
-    description=(
-        "On-chain blockchain data.\n"
-        "- network_stats: network statistics (hashrate, transactions, difficulty)\n"
-        "- fees: current transaction fee estimates\n"
-        "Supported chains: bitcoin, ethereum"
-    ),
-    schema={
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "enum": ["network_stats", "fees"]},
-            "chain": {"type": "string", "enum": ["bitcoin", "ethereum"], "default": "bitcoin"},
-        },
-        "required": ["action"],
-    },
-)
-async def handle_chain_data(exchange, action: str, chain: str = "bitcoin", **_) -> str:
-    try:
-        if action == "network_stats":
-            return _get_network_stats(chain)
-        elif action == "fees":
-            return _get_fees(chain)
-        return f"Unknown action: {action}"
-    except (URLError, OSError, json.JSONDecodeError) as e:
-        return f"Error fetching chain data: {e}"
-    except Exception as e:
-        return f"Error in chain_data: {e}"
-
-
-def _get_network_stats(chain: str) -> str:
+def _get_network_stats(chain: str) -> list[str]:
     if chain == "bitcoin":
         data = _fetch_json(BLOCKCHAIN_INFO_STATS)
-        lines = [
+        return [
             "Bitcoin Network Stats",
             "=" * 40,
             f"Market Price:        ${data.get('market_price_usd', 0):,.2f}",
@@ -71,12 +41,10 @@ def _get_network_stats(chain: str) -> str:
             f"Total BTC Mined:     {data.get('totalbc', 0) / 1e8:,.0f} BTC",
             f"Minutes Between Blocks: {data.get('minutes_between_blocks', 0):.1f}",
         ]
-        return "\n".join(lines)
-
     elif chain == "ethereum":
         data = _fetch_json(BLOCKCHAIR_STATS.format(chain="ethereum"))
         stats = data.get("data", {})
-        lines = [
+        return [
             "Ethereum Network Stats",
             "=" * 40,
             f"Market Price:        ${stats.get('market_price_usd', 0):,.2f}",
@@ -86,15 +54,13 @@ def _get_network_stats(chain: str) -> str:
             f"Mempool TXs:         {_format_number(stats.get('mempool_transactions', 0))}",
             f"Average Block Time:  {stats.get('average_block_time', 0):.1f}s",
         ]
-        return "\n".join(lines)
-
-    return f"Unsupported chain: {chain}"
+    return [f"Unsupported chain: {chain}"]
 
 
-def _get_fees(chain: str) -> str:
+def _get_fees(chain: str) -> list[str]:
     if chain == "bitcoin":
         data = _fetch_json(MEMPOOL_FEES)
-        lines = [
+        return [
             "Bitcoin Fee Estimates (sat/vB)",
             "=" * 40,
             f"Fastest (~10 min):   {data.get('fastestFee', 'N/A')} sat/vB",
@@ -103,12 +69,32 @@ def _get_fees(chain: str) -> str:
             f"Economy:             {data.get('economyFee', 'N/A')} sat/vB",
             f"Minimum:             {data.get('minimumFee', 'N/A')} sat/vB",
         ]
-        return "\n".join(lines)
-
     elif chain == "ethereum":
         data = _fetch_json(BLOCKCHAIR_STATS.format(chain="ethereum"))
         stats = data.get("data", {})
         median_fee = stats.get("median_transaction_fee_usd_24h", "N/A")
-        return f"Ethereum Median Transaction Fee (24h): ${median_fee}"
+        return [f"Ethereum Median Transaction Fee (24h): ${median_fee}"]
+    return [f"Unsupported chain: {chain}"]
 
-    return f"Unsupported chain: {chain}"
+
+@register_tool(
+    name="get_chain_stats",
+    description="Get blockchain network statistics and current fee estimates for Bitcoin or Ethereum.",
+    schema={
+        "type": "object",
+        "properties": {
+            "chain": {"type": "string", "enum": ["bitcoin", "ethereum"], "default": "bitcoin"},
+        },
+        "required": [],
+    },
+)
+async def handle_get_chain_stats(exchange, chain: str = "bitcoin", **_) -> str:
+    try:
+        lines = _get_network_stats(chain)
+        lines.append("")
+        lines.extend(_get_fees(chain))
+        return "\n".join(lines)
+    except (URLError, OSError, json.JSONDecodeError) as e:
+        return f"Error fetching chain data: {e}"
+    except Exception as e:
+        return f"Error in get_chain_stats: {e}"

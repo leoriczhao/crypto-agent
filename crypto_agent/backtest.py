@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from .tools.strategy import compute_sma, compute_rsi, compute_bollinger
+from .indicators import compute_sma, compute_rsi, compute_bollinger
 
 
 @dataclass

@@ -1,1 +1,1 @@
-from . import market_data, execute_trade, portfolio, news_feed, strategy, risk_check, schedule, exchange_manage, backtest, chain_data, delegate, soul, load_skill, compact
+from . import get_price, get_klines, buy, sell, cancel_order, get_portfolio, analyze, assess_risk, backtest, get_news, get_chain_stats, delegate, load_skill, compact, switch_exchange, switch_soul, schedule
