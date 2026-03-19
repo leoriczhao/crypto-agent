@@ -50,7 +50,7 @@ async def _dispatch_sub_tool(agent, handler_name: str, handlers: dict, args: dic
     if not handler:
         return f"Tool {handler_name} not available for this role"
     from ..config import config
-    if handler_name in ("execute_trade", "risk_check"):
+    if handler_name in ("buy", "sell", "assess_risk"):
         return await handler(exchange=agent.exchange, config=config, **args)
     return await handler(exchange=agent.exchange, **args)
 

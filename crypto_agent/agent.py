@@ -13,30 +13,21 @@ from . import tools  # noqa: F401 — triggers tool registration
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
 
-SYSTEM_BASE = """You are a cryptocurrency trading assistant with access to multiple tools and sub-agents.
+SYSTEM_BASE = """You are a cryptocurrency trading assistant. Each of your tools does ONE thing:
 
-Capabilities:
-- Check prices, charts, order books for any crypto pair
-- Execute buy/sell orders (paper trading by default)
-- Track portfolio, positions, and PnL
-- Fetch crypto news headlines and sentiment analysis
-- Technical analysis with SMA, RSI, Bollinger Bands and trading signals
-- Portfolio risk assessment (exposure, concentration, drawdown)
-- Manage multiple exchanges (list, switch, compare prices across exchanges)
-- Backtest strategies on historical data (SMA crossover, RSI reversal, Bollinger bounce)
-- On-chain data: Bitcoin/Ethereum network stats and fee estimates
-- Delegate to specialist sub-agents: researcher (analysis), trader (execution), risk_officer (oversight)
-- Trading personality (soul): switch between conservative, balanced, aggressive styles
-- Load specialized knowledge on demand with load_skill
-- Compress conversation with compact when context gets long
+Market: get_price, get_klines
+Trade: buy, sell, cancel_order
+Portfolio: get_portfolio (balances + positions + PnL)
+Analysis: analyze (SMA/RSI/Bollinger + signals), assess_risk, backtest
+Research: get_news (headlines + sentiment), get_chain_stats
+Control: delegate (to researcher/trader/risk_officer), switch_exchange, switch_soul, schedule
+Knowledge: load_skill (domain expertise on demand), compact (free context space)
 
-When handling complex requests, consider delegating to the appropriate sub-agent.
-Use load_skill to access detailed knowledge before making strategy or risk decisions.
-When the user asks to change trading style (e.g. "切换到保守模式", "be more aggressive"), use the soul tool.
+Compose tools to answer complex questions. Example:
+  "Should I buy ETH?" → get_price + analyze + get_news + assess_risk → synthesize answer
 
-Always show prices with appropriate precision. When discussing trades, mention the current mode (PAPER/LIVE).
-Be concise. Use tables for data when appropriate.
-Symbols use format: BTC/USDT, ETH/USDT, SOL/USDT etc.
+Always mention mode (PAPER/LIVE) when discussing trades.
+Be concise. Use tables for data. Symbols: BTC/USDT, ETH/USDT, SOL/USDT etc.
 """
 
 
@@ -107,26 +98,26 @@ class CryptoAgent:
         handler = TOOL_HANDLERS.get(name)
         if not handler:
             return f"Unknown tool: {name}"
-        if name == "exchange_manage":
+
+        # Tools with special dependencies
+        if name == "switch_exchange":
             return await handler(exchange_manager=self.exchange_manager, **inputs)
         if name == "delegate":
             return await handler(agent=self, **inputs)
-        if name == "soul":
+        if name == "switch_soul":
             return await handler(soul=self.soul, **inputs)
         if name == "load_skill":
             return await handler(skill_loader=self.skill_loader, **inputs)
         if name == "compact":
             return await handler(agent=self, **inputs)
-        if name == "market_data" and inputs.get("exchange_id"):
-            try:
-                ex = self.exchange_manager.get(inputs["exchange_id"])
-            except KeyError as e:
-                return str(e)
-            return await handler(exchange=ex, **inputs)
-        if name in ("execute_trade", "risk_check"):
-            return await handler(exchange=self.exchange, config=config, **inputs)
         if name == "schedule":
             return await handler(**inputs)
+
+        # Tools that need config (buy, sell, assess_risk)
+        if name in ("buy", "sell", "assess_risk"):
+            return await handler(exchange=self.exchange, config=config, **inputs)
+
+        # All other tools just need the active exchange
         return await handler(exchange=self.exchange, **inputs)
 
     async def chat(self, user_message: str) -> str:

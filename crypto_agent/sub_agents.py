@@ -8,7 +8,7 @@ ROLES = {
             "Provide thorough analysis with data to support your conclusions. "
             "You do NOT execute trades. Present findings clearly with actionable insights."
         ),
-        "tools": ["market_data", "news_feed", "chain_data", "strategy"],
+        "tools": ["get_price", "get_klines", "analyze", "get_news", "get_chain_stats"],
     },
     "trader": {
         "system": (
@@ -17,7 +17,7 @@ ROLES = {
             "Use technical analysis to time entries and exits. "
             "Report every trade with rationale, entry price, and target."
         ),
-        "tools": ["market_data", "execute_trade", "portfolio", "strategy", "backtest"],
+        "tools": ["get_price", "get_klines", "buy", "sell", "cancel_order", "get_portfolio", "analyze", "backtest"],
     },
     "risk_officer": {
         "system": (
@@ -26,7 +26,7 @@ ROLES = {
             "Flag any concerning exposures. You do NOT execute trades — you advise on risk. "
             "Be conservative and protective of capital."
         ),
-        "tools": ["risk_check", "portfolio", "market_data"],
+        "tools": ["get_price", "get_portfolio", "assess_risk"],
     },
 }
 

@@ -1,5 +1,5 @@
 import pytest
-from crypto_agent.tools.strategy import compute_sma, compute_rsi, compute_bollinger
+from crypto_agent.indicators import compute_sma, compute_rsi, compute_bollinger
 
 
 def test_sma():

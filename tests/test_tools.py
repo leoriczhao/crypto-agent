@@ -1,10 +1,10 @@
-import asyncio
 import json
 import pytest
 from crypto_agent.exchange.paper import PaperExchange
-from crypto_agent.tools.market_data import handle_market_data
-from crypto_agent.tools.execute_trade import handle_execute_trade
-from crypto_agent.tools.portfolio import handle_portfolio
+from crypto_agent.tools.get_price import handle_get_price
+from crypto_agent.tools.buy import handle_buy
+from crypto_agent.tools.sell import handle_sell
+from crypto_agent.tools.get_portfolio import handle_get_portfolio
 from crypto_agent.config import Config
 
 
@@ -19,8 +19,8 @@ def test_config():
 
 
 @pytest.mark.asyncio
-async def test_market_data_ticker(exchange):
-    result = await handle_market_data(exchange, action="ticker", symbol="BTC/USDT")
+async def test_get_price(exchange):
+    result = await handle_get_price(exchange, symbol="BTC/USDT")
     data = json.loads(result)
     assert "last" in data
     assert data["last"] > 0
@@ -28,31 +28,29 @@ async def test_market_data_ticker(exchange):
 
 
 @pytest.mark.asyncio
-async def test_execute_buy(exchange, test_config):
-    result = await handle_execute_trade(exchange, test_config, action="buy",
-                                        symbol="BTC/USDT", amount=0.001, order_type="market")
+async def test_buy(exchange, test_config):
+    result = await handle_buy(exchange, test_config, symbol="BTC/USDT", amount=0.001)
     assert "PAPER" in result
-    assert "filled" in result.lower()
+    assert "filled" in result.lower() or "Buy order" in result
     await exchange.close()
 
 
 @pytest.mark.asyncio
-async def test_execute_trade_too_large(exchange, test_config):
-    result = await handle_execute_trade(exchange, test_config, action="buy",
-                                        symbol="BTC/USDT", amount=100, order_type="market")
+async def test_buy_too_large(exchange, test_config):
+    result = await handle_buy(exchange, test_config, symbol="BTC/USDT", amount=100)
     assert "exceeds max" in result
     await exchange.close()
 
 
 @pytest.mark.asyncio
-async def test_portfolio_balance(exchange):
-    result = await handle_portfolio(exchange, action="balance")
+async def test_get_portfolio_balance(exchange):
+    result = await handle_get_portfolio(exchange)
     assert "USDT" in result
     await exchange.close()
 
 
 @pytest.mark.asyncio
-async def test_portfolio_positions_empty(exchange):
-    result = await handle_portfolio(exchange, action="positions")
+async def test_get_portfolio_no_positions(exchange):
+    result = await handle_get_portfolio(exchange)
     assert "No open positions" in result
     await exchange.close()

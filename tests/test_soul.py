@@ -67,35 +67,27 @@ def test_conservative_stricter_than_aggressive():
 
 @pytest.mark.asyncio
 async def test_soul_tool_status():
-    from crypto_agent.tools.soul import handle_soul
+    from crypto_agent.tools.switch_soul import handle_switch_soul
     s = Soul("aggressive")
-    result = await handle_soul(soul=s, action="status")
+    result = await handle_switch_soul(soul=s)
     assert "Aggressive" in result
     assert "激进" in result
 
 
 @pytest.mark.asyncio
 async def test_soul_tool_switch():
-    from crypto_agent.tools.soul import handle_soul
+    from crypto_agent.tools.switch_soul import handle_switch_soul
     s = Soul("balanced")
-    result = await handle_soul(soul=s, action="switch", personality="conservative")
+    result = await handle_switch_soul(soul=s, personality="conservative")
     assert "Conservative" in result
     assert s.soul_id == "conservative"
 
 
 @pytest.mark.asyncio
 async def test_soul_tool_list():
-    from crypto_agent.tools.soul import handle_soul
+    from crypto_agent.tools.switch_soul import handle_switch_soul
     s = Soul()
-    result = await handle_soul(soul=s, action="list")
+    result = await handle_switch_soul(soul=s)
     assert "conservative" in result.lower()
     assert "balanced" in result.lower()
     assert "aggressive" in result.lower()
-
-
-@pytest.mark.asyncio
-async def test_soul_tool_switch_missing_personality():
-    from crypto_agent.tools.soul import handle_soul
-    s = Soul()
-    result = await handle_soul(soul=s, action="switch")
-    assert "Error" in result
