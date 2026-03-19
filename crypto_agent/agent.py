@@ -54,7 +54,8 @@ class CryptoAgent:
         default_ex = (
             PaperExchange(config.default_exchange, config.initial_balance)
             if config.paper_trading
-            else LiveExchange(config.default_exchange)
+            else LiveExchange(config.default_exchange, config.exchange_api_key,
+                              config.exchange_secret, config.exchange_password)
         )
         self.exchange_manager.register(config.default_exchange, default_ex)
 

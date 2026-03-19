@@ -1,6 +1,11 @@
 import asyncio
+import os
 from datetime import datetime, timedelta
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from rich.console import Console
+from rich.markdown import Markdown
 from .agent import CryptoAgent
 from .config import config
 from .memory import Memory
@@ -9,6 +14,7 @@ from .notify import Notifier
 from .tools.registry import TOOL_HANDLERS
 
 console = Console()
+HISTORY_FILE = os.path.expanduser("~/.crypto_agent_history")
 
 
 class CryptoDaemon:
@@ -59,14 +65,17 @@ class CryptoDaemon:
                     console.print(f"[red]Cron error: {e}[/red]")
 
     async def run(self):
-        mode = "PAPER" if config.paper_trading else "LIVE"
-        exchange_count = len(self.agent.exchange_manager.list())
-        extra = f" + {exchange_count - 1} more" if exchange_count > 1 else ""
+        mode = "[red]LIVE[/]" if not config.paper_trading else "[green]PAPER[/]"
         soul_name = self.agent.soul.name
-        console.print(f"\n[bold cyan]Crypto Agent Daemon[/] [dim]({mode} | {config.default_exchange}{extra} | {soul_name} | heartbeat: {config.heartbeat_interval}s)[/dim]")
+        console.print(f"\n[bold cyan]Crypto Agent Daemon[/] [dim]({mode} | {config.default_exchange} | {soul_name} | heartbeat: {config.heartbeat_interval}s)[/dim]")
         if self.notifier.enabled:
             console.print("[dim]Telegram notifications: enabled[/dim]")
-        console.print("[dim]Type message or 'q' to quit. Heartbeat runs in background.[/dim]\n")
+        console.print("[dim]↑↓ history | Ctrl+D quit | Heartbeat runs in background[/dim]\n")
+
+        session: PromptSession = PromptSession(
+            history=FileHistory(HISTORY_FILE),
+            auto_suggest=AutoSuggestFromHistory(),
+        )
 
         await self.heartbeat.start()
         cron_task = asyncio.create_task(self._check_cron_jobs())
@@ -74,24 +83,24 @@ class CryptoDaemon:
         try:
             while True:
                 try:
-                    import sys
-                    def _read_input():
-                        sys.stdout.write("\033[32m>> \033[0m")
-                        sys.stdout.flush()
-                        line = sys.stdin.readline()
-                        return line.rstrip("\n") if line else ""
-                    query = await asyncio.get_event_loop().run_in_executor(None, _read_input)
+                    query = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: session.prompt(">> ")
+                    )
                 except (EOFError, KeyboardInterrupt):
                     break
-                if query.strip().lower() in ("q", "exit", "quit", ""):
+
+                query = query.strip()
+                if not query:
+                    continue
+                if query.lower() in ("q", "exit", "quit"):
                     break
 
                 self.memory.save_message("user", query)
-                response = await self.agent.chat(query)
+                with console.status("[dim]Thinking...[/dim]", spinner="dots"):
+                    response = await self.agent.chat(query)
                 self.memory.save_message("assistant", response)
 
                 console.print()
-                from rich.markdown import Markdown
                 console.print(Markdown(response))
                 console.print()
         finally:

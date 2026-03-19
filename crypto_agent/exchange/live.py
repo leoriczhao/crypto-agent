@@ -3,9 +3,12 @@ from .base import BaseExchange
 
 
 class LiveExchange(BaseExchange):
-    def __init__(self, exchange_id: str = "binance", api_key: str = "", secret: str = ""):
+    def __init__(self, exchange_id: str = "binance", api_key: str = "", secret: str = "", password: str = ""):
         exchange_class = getattr(ccxt, exchange_id)
-        self.exchange = exchange_class({"apiKey": api_key, "secret": secret, "enableRateLimit": True})
+        opts = {"apiKey": api_key, "secret": secret, "enableRateLimit": True}
+        if password:
+            opts["password"] = password
+        self.exchange = exchange_class(opts)
 
     async def fetch_ticker(self, symbol: str) -> dict:
         t = await self.exchange.fetch_ticker(symbol)

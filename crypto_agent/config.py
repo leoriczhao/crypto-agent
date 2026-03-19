@@ -23,6 +23,9 @@ class Config:
     memory_db_path: str = field(default_factory=lambda: os.getenv("MEMORY_DB_PATH", "crypto_agent.db"))
     notify_telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     notify_telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    exchange_api_key: str = field(default_factory=lambda: os.getenv("EXCHANGE_API_KEY", ""))
+    exchange_secret: str = field(default_factory=lambda: os.getenv("EXCHANGE_SECRET", ""))
+    exchange_password: str = field(default_factory=lambda: os.getenv("EXCHANGE_PASSWORD", ""))
     extra_exchanges: dict = field(default_factory=lambda: json.loads(os.getenv("EXTRA_EXCHANGES", "{}")))
     trading_soul: str = field(default_factory=lambda: os.getenv("TRADING_SOUL", "balanced"))
 
