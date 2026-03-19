@@ -20,7 +20,8 @@ async def main():
     try:
         while True:
             try:
-                query = console.input("[bold green]>> [/]")
+                console.print("[bold green]>> [/]", end="")
+                query = input()
             except (EOFError, KeyboardInterrupt):
                 break
             if query.strip().lower() in ("q", "exit", "quit", ""):

@@ -74,9 +74,10 @@ class CryptoDaemon:
         try:
             while True:
                 try:
-                    query = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: console.input("[bold green]>> [/]")
-                    )
+                    def _read_input():
+                        console.print("[bold green]>> [/]", end="")
+                        return input()
+                    query = await asyncio.get_event_loop().run_in_executor(None, _read_input)
                 except (EOFError, KeyboardInterrupt):
                     break
                 if query.strip().lower() in ("q", "exit", "quit", ""):
