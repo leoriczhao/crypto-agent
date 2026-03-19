@@ -1,14 +1,19 @@
 import json
+from pathlib import Path
 from .config import config
 from .exchange.paper import PaperExchange
 from .exchange.live import LiveExchange
 from .exchange.manager import ExchangeManager
 from .tools.registry import TOOL_DEFINITIONS, TOOL_HANDLERS
 from .soul import Soul
+from .skill_loader import SkillLoader
+from .context import micro_compact, auto_compact, estimate_tokens
 from . import tools  # noqa: F401 — triggers tool registration
 
+SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
-SYSTEM = """You are a cryptocurrency trading assistant with access to multiple tools and sub-agents.
+
+SYSTEM_BASE = """You are a cryptocurrency trading assistant with access to multiple tools and sub-agents.
 
 Capabilities:
 - Check prices, charts, order books for any crypto pair
@@ -22,9 +27,11 @@ Capabilities:
 - On-chain data: Bitcoin/Ethereum network stats and fee estimates
 - Delegate to specialist sub-agents: researcher (analysis), trader (execution), risk_officer (oversight)
 - Trading personality (soul): switch between conservative, balanced, aggressive styles
+- Load specialized knowledge on demand with load_skill
+- Compress conversation with compact when context gets long
 
 When handling complex requests, consider delegating to the appropriate sub-agent.
-For example: "analyze BTC market" → delegate to researcher; "check my risk" → delegate to risk_officer.
+Use load_skill to access detailed knowledge before making strategy or risk decisions.
 When the user asks to change trading style (e.g. "切换到保守模式", "be more aggressive"), use the soul tool.
 
 Always show prices with appropriate precision. When discussing trades, mention the current mode (PAPER/LIVE).
@@ -67,6 +74,7 @@ class CryptoAgent:
             self.exchange_manager.register(ex_id, ex)
 
         self.soul = Soul(config.trading_soul)
+        self.skill_loader = SkillLoader(SKILLS_DIR)
         self.messages: list = []
         self.provider = config.llm_provider
 
@@ -89,7 +97,11 @@ class CryptoAgent:
 
     @property
     def system_prompt(self) -> str:
-        return SYSTEM + self.soul.system_modifier
+        skills_section = self.skill_loader.get_descriptions()
+        return SYSTEM_BASE + f"\nSkills available (use load_skill to access):\n{skills_section}" + self.soul.system_modifier
+
+    def _compact_model(self) -> str:
+        return config.model_id
 
     async def _dispatch_tool(self, name: str, inputs: dict) -> str:
         handler = TOOL_HANDLERS.get(name)
@@ -101,6 +113,10 @@ class CryptoAgent:
             return await handler(agent=self, **inputs)
         if name == "soul":
             return await handler(soul=self.soul, **inputs)
+        if name == "load_skill":
+            return await handler(skill_loader=self.skill_loader, **inputs)
+        if name == "compact":
+            return await handler(agent=self, **inputs)
         if name == "market_data" and inputs.get("exchange_id"):
             try:
                 ex = self.exchange_manager.get(inputs["exchange_id"])
@@ -115,6 +131,10 @@ class CryptoAgent:
 
     async def chat(self, user_message: str) -> str:
         self.messages.append({"role": "user", "content": user_message})
+        self.messages = micro_compact(self.messages)
+        self.messages = auto_compact(
+            self.messages, self.client, self._compact_model(), self.provider,
+        )
 
         if self.provider == "openai":
             return await self._chat_openai()
