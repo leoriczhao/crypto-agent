@@ -4,6 +4,7 @@ from .exchange.paper import PaperExchange
 from .exchange.live import LiveExchange
 from .exchange.manager import ExchangeManager
 from .tools.registry import TOOL_DEFINITIONS, TOOL_HANDLERS
+from .soul import Soul
 from . import tools  # noqa: F401 — triggers tool registration
 
 
@@ -20,9 +21,11 @@ Capabilities:
 - Backtest strategies on historical data (SMA crossover, RSI reversal, Bollinger bounce)
 - On-chain data: Bitcoin/Ethereum network stats and fee estimates
 - Delegate to specialist sub-agents: researcher (analysis), trader (execution), risk_officer (oversight)
+- Trading personality (soul): switch between conservative, balanced, aggressive styles
 
 When handling complex requests, consider delegating to the appropriate sub-agent.
 For example: "analyze BTC market" → delegate to researcher; "check my risk" → delegate to risk_officer.
+When the user asks to change trading style (e.g. "切换到保守模式", "be more aggressive"), use the soul tool.
 
 Always show prices with appropriate precision. When discussing trades, mention the current mode (PAPER/LIVE).
 Be concise. Use tables for data when appropriate.
@@ -62,6 +65,7 @@ class CryptoAgent:
                 ex = LiveExchange(ex_id, creds.get("api_key", ""), creds.get("secret", ""))
             self.exchange_manager.register(ex_id, ex)
 
+        self.soul = Soul(config.trading_soul)
         self.messages: list = []
         self.provider = config.llm_provider
 
@@ -82,6 +86,10 @@ class CryptoAgent:
     def exchange(self):
         return self.exchange_manager.active
 
+    @property
+    def system_prompt(self) -> str:
+        return SYSTEM + self.soul.system_modifier
+
     async def _dispatch_tool(self, name: str, inputs: dict) -> str:
         handler = TOOL_HANDLERS.get(name)
         if not handler:
@@ -90,6 +98,8 @@ class CryptoAgent:
             return await handler(exchange_manager=self.exchange_manager, **inputs)
         if name == "delegate":
             return await handler(agent=self, **inputs)
+        if name == "soul":
+            return await handler(soul=self.soul, **inputs)
         if name == "market_data" and inputs.get("exchange_id"):
             try:
                 ex = self.exchange_manager.get(inputs["exchange_id"])
@@ -114,7 +124,7 @@ class CryptoAgent:
         while True:
             response = self.client.chat.completions.create(
                 model=config.model_id,
-                messages=[{"role": "system", "content": SYSTEM}] + self.messages,
+                messages=[{"role": "system", "content": self.system_prompt}] + self.messages,
                 tools=tools,
                 max_tokens=4096,
             )
@@ -148,7 +158,7 @@ class CryptoAgent:
         while True:
             response = self.client.messages.create(
                 model=config.model_id,
-                system=SYSTEM,
+                system=self.system_prompt,
                 messages=self.messages,
                 tools=TOOL_DEFINITIONS,
                 max_tokens=4096,

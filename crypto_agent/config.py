@@ -24,6 +24,7 @@ class Config:
     notify_telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     notify_telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
     extra_exchanges: dict = field(default_factory=lambda: json.loads(os.getenv("EXTRA_EXCHANGES", "{}")))
+    trading_soul: str = field(default_factory=lambda: os.getenv("TRADING_SOUL", "balanced"))
 
 
 config = Config()
