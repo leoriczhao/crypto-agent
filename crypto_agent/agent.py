@@ -2,8 +2,9 @@ import json
 from .config import config
 from .exchange.paper import PaperExchange
 from .exchange.live import LiveExchange
+from .exchange.manager import ExchangeManager
 from .tools.registry import TOOL_DEFINITIONS, TOOL_HANDLERS
-from .tools import market_data, execute_trade, portfolio, news_feed, strategy, risk_check  # noqa: F401
+from .tools import market_data, execute_trade, portfolio, news_feed, strategy, risk_check, exchange_manage  # noqa: F401
 
 
 SYSTEM = """You are a cryptocurrency trading assistant.
@@ -40,11 +41,21 @@ def _openai_tools() -> list[dict]:
 
 class CryptoAgent:
     def __init__(self):
-        self.exchange = (
+        self.exchange_manager = ExchangeManager()
+        default_ex = (
             PaperExchange(config.default_exchange, config.initial_balance)
             if config.paper_trading
             else LiveExchange(config.default_exchange)
         )
+        self.exchange_manager.register(config.default_exchange, default_ex)
+
+        for ex_id, creds in config.extra_exchanges.items():
+            if config.paper_trading:
+                ex = PaperExchange(ex_id, config.initial_balance)
+            else:
+                ex = LiveExchange(ex_id, creds.get("api_key", ""), creds.get("secret", ""))
+            self.exchange_manager.register(ex_id, ex)
+
         self.messages: list = []
         self.provider = config.llm_provider
 
@@ -61,10 +72,22 @@ class CryptoAgent:
                 base_url=config.api_base_url or None,
             )
 
+    @property
+    def exchange(self):
+        return self.exchange_manager.active
+
     async def _dispatch_tool(self, name: str, inputs: dict) -> str:
         handler = TOOL_HANDLERS.get(name)
         if not handler:
             return f"Unknown tool: {name}"
+        if name == "exchange_manage":
+            return await handler(exchange_manager=self.exchange_manager, **inputs)
+        if name == "market_data" and inputs.get("exchange_id"):
+            try:
+                ex = self.exchange_manager.get(inputs["exchange_id"])
+            except KeyError as e:
+                return str(e)
+            return await handler(exchange=ex, **inputs)
         if name in ("execute_trade", "risk_check"):
             return await handler(exchange=self.exchange, config=config, **inputs)
         if name == "schedule":
@@ -140,4 +163,4 @@ class CryptoAgent:
             self.messages.append({"role": "user", "content": results})
 
     async def close(self):
-        await self.exchange.close()
+        await self.exchange_manager.close_all()

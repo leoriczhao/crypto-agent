@@ -18,11 +18,12 @@ from .registry import register_tool
             "symbol": {"type": "string", "description": "Trading pair, e.g. BTC/USDT"},
             "timeframe": {"type": "string", "description": "Kline interval: 1m,5m,15m,1h,4h,1d", "default": "1h"},
             "limit": {"type": "integer", "description": "Number of results", "default": 24},
+            "exchange_id": {"type": "string", "description": "Specific exchange to query (optional, uses active exchange if not set)"},
         },
         "required": ["action", "symbol"],
     },
 )
-async def handle_market_data(exchange, action: str, symbol: str, timeframe: str = "1h", limit: int = 24, **_) -> str:
+async def handle_market_data(exchange, action: str, symbol: str, timeframe: str = "1h", limit: int = 24, exchange_id: str = "", **_) -> str:
     try:
         if action == "ticker":
             data = await exchange.fetch_ticker(symbol)

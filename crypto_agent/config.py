@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
@@ -22,6 +23,7 @@ class Config:
     memory_db_path: str = field(default_factory=lambda: os.getenv("MEMORY_DB_PATH", "crypto_agent.db"))
     notify_telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     notify_telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    extra_exchanges: dict = field(default_factory=lambda: json.loads(os.getenv("EXTRA_EXCHANGES", "{}")))
 
 
 config = Config()
