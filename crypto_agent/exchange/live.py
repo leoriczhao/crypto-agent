@@ -50,13 +50,16 @@ class LiveExchange(BaseExchange):
             if contracts == 0:
                 continue
             symbol = p.get("symbol", "")
+            side = p.get("side", "long")
+            hedged = p.get("hedged", False)
+            key = f"{symbol}:{side}" if hedged else symbol
             entry = float(p.get("entryPrice", 0))
             mark = float(p.get("markPrice", 0)) or float(p.get("lastPrice", 0))
             notional = float(p.get("notional", 0))
             pnl = float(p.get("unrealizedPnl", 0))
-            result[symbol] = {
+            result[key] = {
                 "symbol": symbol,
-                "side": p.get("side", "long"),
+                "side": side,
                 "contracts": contracts,
                 "amount": notional,
                 "avg_entry_price": entry,
@@ -64,6 +67,7 @@ class LiveExchange(BaseExchange):
                 "unrealized_pnl": round(pnl, 2),
                 "leverage": p.get("leverage"),
                 "margin_mode": p.get("marginMode"),
+                "hedged": hedged,
             }
         return result
 
