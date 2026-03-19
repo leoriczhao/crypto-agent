@@ -82,6 +82,8 @@ class CryptoAgent:
             return f"Unknown tool: {name}"
         if name == "exchange_manage":
             return await handler(exchange_manager=self.exchange_manager, **inputs)
+        if name == "delegate":
+            return await handler(agent=self, **inputs)
         if name == "market_data" and inputs.get("exchange_id"):
             try:
                 ex = self.exchange_manager.get(inputs["exchange_id"])
