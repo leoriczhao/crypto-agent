@@ -67,6 +67,8 @@ class CryptoAgent:
             return f"Unknown tool: {name}"
         if name in ("execute_trade", "risk_check"):
             return await handler(exchange=self.exchange, config=config, **inputs)
+        if name == "schedule":
+            return await handler(**inputs)
         return await handler(exchange=self.exchange, **inputs)
 
     async def chat(self, user_message: str) -> str:
