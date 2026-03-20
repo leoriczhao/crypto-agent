@@ -57,6 +57,7 @@ async def _dispatch_sub_tool(agent, handler_name: str, handlers: dict, args: dic
 
 async def _run_openai(agent, runner, messages) -> str:
     from ..config import config
+    from ..llm.provider import openai_sub_agent_kwargs
     tool_defs = runner.get_tool_definitions()
     handlers = runner.get_tool_handlers()
     tools = [
@@ -71,12 +72,12 @@ async def _run_openai(agent, runner, messages) -> str:
         for t in tool_defs
     ] if tool_defs else None
 
+    sub_kw = openai_sub_agent_kwargs(config)
     for _ in range(5):
         response = agent.client.chat.completions.create(
-            model=config.model_id,
             messages=[{"role": "system", "content": runner.system_prompt}] + messages,
             tools=tools,
-            max_tokens=2048,
+            **sub_kw,
         )
         msg = response.choices[0].message
 
@@ -106,16 +107,17 @@ async def _run_openai(agent, runner, messages) -> str:
 
 async def _run_anthropic(agent, runner, messages) -> str:
     from ..config import config
+    from ..llm.provider import anthropic_sub_agent_kwargs
     tool_defs = runner.get_tool_definitions()
     handlers = runner.get_tool_handlers()
 
+    sub_kw = anthropic_sub_agent_kwargs(config)
     for _ in range(5):
         response = agent.client.messages.create(
-            model=config.model_id,
             system=runner.system_prompt,
             messages=messages,
             tools=tool_defs if tool_defs else [],
-            max_tokens=2048,
+            **sub_kw,
         )
         messages.append({"role": "assistant", "content": response.content})
 

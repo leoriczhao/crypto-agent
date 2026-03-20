@@ -45,7 +45,7 @@ def _build_banner(agent: CryptoAgent) -> Panel:
     table.add_row("Mode", mode)
     table.add_row("Exchange", f"{exchanges}" + (f" ({exchange_count} connected)" if exchange_count > 1 else ""))
     table.add_row("Personality", f"[cyan]{agent.soul.name}[/]")
-    table.add_row("Model", f"[dim]{config.model_id}[/]")
+    table.add_row("LLM", f"[dim]{config.llm_provider}[/] · [dim]{config.model_id}[/] · ctx={config.llm_context_window:,}")
 
     return Panel(
         table,

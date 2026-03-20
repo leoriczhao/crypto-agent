@@ -60,7 +60,8 @@ The LLM decides **what** to do. Tools execute **how**. The exchange layer handle
 LLM_PROVIDER=openai          # openai or anthropic
 API_KEY=your-key
 API_BASE_URL=                 # Optional proxy
-MODEL_ID=gpt-5.4-mini
+MODEL_ID=gpt-5.4
+LLM_CONTEXT_WINDOW=500000     # auto-compact threshold
 
 # Exchange
 DEFAULT_EXCHANGE=okx

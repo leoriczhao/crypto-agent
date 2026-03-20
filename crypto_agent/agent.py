@@ -7,7 +7,8 @@ from .exchange.manager import ExchangeManager
 from .tools.registry import TOOL_DEFINITIONS, TOOL_HANDLERS
 from .soul import Soul
 from .skill_loader import SkillLoader
-from .context import micro_compact, auto_compact, estimate_tokens
+from .context import micro_compact, auto_compact
+from .llm.provider import anthropic_message_kwargs, openai_chat_completion_kwargs
 from . import tools  # noqa: F401 — triggers tool registration
 
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -90,9 +91,6 @@ class CryptoAgent:
         skills_section = self.skill_loader.get_descriptions()
         return SYSTEM_BASE + f"\nSkills available (use load_skill to access):\n{skills_section}" + self.soul.system_modifier
 
-    def _compact_model(self) -> str:
-        return config.model_id
-
     async def _dispatch_tool(self, name: str, inputs: dict) -> str:
         handler = TOOL_HANDLERS.get(name)
         if not handler:
@@ -122,9 +120,7 @@ class CryptoAgent:
     async def chat(self, user_message: str) -> str:
         self.messages.append({"role": "user", "content": user_message})
         self.messages = micro_compact(self.messages)
-        self.messages = auto_compact(
-            self.messages, self.client, self._compact_model(), self.provider,
-        )
+        self.messages = auto_compact(self.messages, self.client, self.provider)
 
         if self.provider == "openai":
             return await self._chat_openai()
@@ -132,12 +128,12 @@ class CryptoAgent:
 
     async def _chat_openai(self) -> str:
         tools = _openai_tools()
+        base_kw = openai_chat_completion_kwargs(config)
         while True:
             response = self.client.chat.completions.create(
-                model=config.model_id,
                 messages=[{"role": "system", "content": self.system_prompt}] + self.messages,
                 tools=tools,
-                max_tokens=4096,
+                **base_kw,
             )
             choice = response.choices[0]
             msg = choice.message
@@ -166,13 +162,13 @@ class CryptoAgent:
                 })
 
     async def _chat_anthropic(self) -> str:
+        base_kw = anthropic_message_kwargs(config)
         while True:
             response = self.client.messages.create(
-                model=config.model_id,
                 system=self.system_prompt,
                 messages=self.messages,
                 tools=TOOL_DEFINITIONS,
-                max_tokens=4096,
+                **base_kw,
             )
             self.messages.append({"role": "assistant", "content": response.content})
 

@@ -18,8 +18,10 @@ async def handle_compact(agent, **_) -> str:
 
     before = estimate_tokens(agent.messages)
     agent.messages = auto_compact(
-        agent.messages, agent.client, 
-        agent._compact_model(), agent.provider,
+        agent.messages,
+        agent.client,
+        agent.provider,
+        force=True,
     )
     after = estimate_tokens(agent.messages)
     return f"Context compacted: {before:,} → {after:,} tokens (saved {before - after:,})"
