@@ -19,24 +19,24 @@ Agent = LLM (OpenAI / Anthropic)
 git clone <this-repo>
 cd crypto-agent
 cp .env.example .env   # Edit: add your LLM API key + exchange credentials
-uv sync
-uv run crypto-agent    # Interactive CLI
-uv run crypto-daemon   # Background daemon with heartbeat
+npm install
+npm run dev            # Interactive CLI
+npm run dev:daemon     # Background daemon with heartbeat
 ```
 
 ## Architecture
 
 ```
-User ─→ CLI (prompt_toolkit) ─→ Agent Loop ─→ LLM (GPT/Claude)
-                                    │              │
-                                    │        tool_use decision
-                                    │              │
-                                    ▼              ▼
-                              Tool Dispatch ←── 17 tools
-                                    │
-                              Exchange Layer (ccxt)
-                                    │
-                              OKX / Gate.io / Binance ...
+User ─→ CLI (readline) ─→ Agent Loop ─→ LLM (GPT/Claude)
+                               │              │
+                               │        tool_use decision
+                               │              │
+                               ▼              ▼
+                         Tool Dispatch ←── 17 tools
+                               │
+                         Exchange Layer (ccxt)
+                               │
+                         OKX / Gate.io / Binance ...
 ```
 
 The LLM decides **what** to do. Tools execute **how**. The exchange layer handles **where**.
@@ -80,10 +80,14 @@ TELEGRAM_BOT_TOKEN=           # Optional
 TELEGRAM_CHAT_ID=
 ```
 
-## Testing
+## Scripts
 
 ```bash
-uv run pytest -v     # 77 tests
+npm run dev          # Start interactive CLI (tsx)
+npm run dev:daemon   # Start daemon with heartbeat (tsx)
+npm run build        # Compile TypeScript to dist/
+npm test             # Run tests (vitest, 79 tests)
+npm run test:watch   # Watch mode
 ```
 
 ## License

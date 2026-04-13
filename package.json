@@ -1,0 +1,38 @@
+{
+  "name": "crypto-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LLM + quantitative crypto trading agent with paper trading support",
+  "bin": {
+    "crypto-agent": "dist/cli.js",
+    "crypto-daemon": "dist/daemon.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "dev:daemon": "tsx src/daemon.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "better-sqlite3": "^11.0.0",
+    "ccxt": "^4.5.0",
+    "chalk": "^5.4.0",
+    "dotenv": "^16.4.0",
+    "fullscreen-ink": "^0.1.0",
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "openai": "^4.85.0",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
