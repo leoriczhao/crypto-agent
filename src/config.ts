@@ -84,6 +84,8 @@ export const config = {
   exchangePassword: process.env.EXCHANGE_PASSWORD ?? "",
   extraExchanges: JSON.parse(process.env.EXTRA_EXCHANGES ?? "{}") as Record<string, Record<string, string>>,
   tradingSoul: process.env.TRADING_SOUL ?? "balanced",
+  worldSnapshotEnabled: envBool("WORLD_SNAPSHOT_ENABLED", true),
+  httpsProxy: (process.env.EXCHANGE_HTTPS_PROXY ?? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? "").trim(),
 };
 
 export type Config = typeof config;

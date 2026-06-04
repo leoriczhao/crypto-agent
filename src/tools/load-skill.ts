@@ -10,6 +10,7 @@ registerTool(
     },
     required: ["name"],
   },
+  ["skill_loader"],
   async ({ skill_loader, name }) => {
     return skill_loader.getContent(name);
   },

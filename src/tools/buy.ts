@@ -1,8 +1,11 @@
 import { registerTool } from "./registry.js";
+import { checkTradeAllowed } from "../trade-guard.js";
+import { DEFAULT_RISK_PARAMS } from "../strategy/state.js";
+import { withTradeLock } from "../trade-lock.js";
 
 registerTool(
   "buy",
-  "Buy cryptocurrency. Places a market or limit buy order. Checks against max order size.",
+  "Buy cryptocurrency. Places a market or limit buy order. Enforces risk limits (soul constraints, exposure, drawdown).",
   {
     type: "object",
     properties: {
@@ -13,30 +16,80 @@ registerTool(
     },
     required: ["symbol", "amount"],
   },
-  async ({ exchange, config, memory, sessionId, symbol, amount, order_type = "market", price }) => {
+  ["exchange", "config", "memory", "sessionId", "soul", "strategy_store"],
+  async ({ exchange, config, memory, sessionId, soul, strategy_store, symbol, amount, order_type = "market", price }) => {
     try {
       if (amount <= 0) return "Error: amount must be > 0";
       const ticker = await exchange.fetchTicker(symbol);
       const cost = ticker.last * amount;
-      if (cost > config.maxOrderSizeUsdt) {
-        return `Error: Order size $${cost.toFixed(2)} exceeds max $${config.maxOrderSizeUsdt.toFixed(2)}. Reduce amount or adjust config.`;
-      }
-      const mode = config.paperTrading ? "PAPER" : "LIVE";
-      const result = await exchange.createOrder(symbol, "buy", order_type, amount, price);
-      if (result.error) return `[${mode}] Buy failed: ${result.error}`;
+      const riskParams = strategy_store?.riskParams ?? DEFAULT_RISK_PARAMS;
 
-      if (memory && sessionId) {
-        memory.logTrade(sessionId, {
+      // Baseline for drawdown = peak watermark if available, else configured initial.
+      const watermark = memory?.getPortfolioWatermark();
+      const baseline = watermark?.peakValue ?? (config.initialBalance.USDT ?? 10000);
+      const today = new Date().toISOString().slice(0, 10);
+      const dailyPnl = memory?.getDailyPnl(today);
+
+      // Serialize risk-check + order-placement — prevents concurrent sessions
+      // (or LLM vs fast-path) from racing on the same account.
+      return await withTradeLock(`buy ${symbol} ${amount}`, async () => {
+        const guard = await checkTradeAllowed(
+          {
+            exchange,
+            riskParams,
+            soulMaxPositionPct: soul?.max_position_pct ?? 20,
+            maxOrderSizeUsdt: config.maxOrderSizeUsdt,
+            initialBalanceUsdt: baseline,
+            dailyPnl,
+          },
+          symbol,
+          "buy",
+          cost,
+        );
+        if (!guard.allowed) return `BLOCKED: ${guard.reason}`;
+
+        const mode = config.paperTrading ? "PAPER" : "LIVE";
+
+        // Record intent before sending — if we crash between here and the
+        // exchange response, restart will find a 'open' row to reconcile.
+        const pendingId = memory?.createPendingOrder({
+          sessionId,
           symbol,
           side: "buy",
+          orderType: order_type,
+          price: order_type === "limit" ? price : null,
           amount,
-          price: result.price ?? ticker.last,
-          order_type,
-          mode,
-        });
-      }
+        }) ?? null;
 
-      return `[${mode}] Buy order filled:\n${JSON.stringify(result, null, 2)}`;
+        const result = await exchange.createOrder(symbol, "buy", order_type, amount, price);
+        if (result.error) {
+          if (pendingId !== null) memory?.updatePendingOrder(pendingId, { status: "unknown" });
+          return `[${mode}] Buy failed: ${result.error}`;
+        }
+
+        if (pendingId !== null) {
+          // Market orders fill immediately → 'filled'; limit may sit 'open'.
+          const finalStatus = order_type === "market" ? "filled" : "open";
+          memory?.updatePendingOrder(pendingId, {
+            exchangeOrderId: result.id ?? null,
+            status: finalStatus,
+          });
+        }
+
+        if (memory && sessionId) {
+          memory.logTrade(sessionId, {
+            symbol,
+            side: "buy",
+            amount,
+            price: result.price ?? ticker.last,
+            order_type,
+            mode,
+          });
+        }
+
+        const warnings = guard.warnings.length ? `\nWarnings: ${guard.warnings.join("; ")}` : "";
+        return `[${mode}] Buy order filled:\n${JSON.stringify(result, null, 2)}${warnings}`;
+      });
     } catch (e: any) {
       return `Error: ${e.message ?? e}`;
     }

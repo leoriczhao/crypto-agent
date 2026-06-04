@@ -4,6 +4,7 @@ registerTool(
   "get_portfolio",
   "Get complete portfolio overview: asset balances, open positions with PnL, and open orders.",
   { type: "object", properties: {} },
+  ["exchange"],
   async ({ exchange }) => {
     try {
       const lines: string[] = [];

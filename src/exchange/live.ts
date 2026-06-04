@@ -5,11 +5,12 @@ export class LiveExchange implements BaseExchange {
   private exchange: Exchange;
   readonly exchangeId: string;
 
-  constructor(exchangeId = "binance", apiKey = "", secret = "", password = "") {
+  constructor(exchangeId = "binance", apiKey = "", secret = "", password = "", httpsProxy = "") {
     this.exchangeId = exchangeId;
     const ExchangeClass = (ccxt as any)[exchangeId] as new (opts: any) => Exchange;
     const opts: Record<string, any> = { apiKey, secret, enableRateLimit: true };
     if (password) opts.password = password;
+    if (httpsProxy) opts.httpsProxy = httpsProxy;
     this.exchange = new ExchangeClass(opts);
   }
 

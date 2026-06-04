@@ -58,6 +58,7 @@ registerTool(
     },
     required: [],
   },
+  [],
   async ({ symbol = "BTC", limit = 5 }) => {
     try {
       let headlines: Array<{ title: string; url: string; published: string }>;

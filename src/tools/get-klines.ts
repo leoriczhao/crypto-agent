@@ -12,6 +12,7 @@ registerTool(
     },
     required: ["symbol"],
   },
+  ["exchange"],
   async ({ exchange, symbol, timeframe = "1h", limit = 24 }) => {
     try {
       const data = await exchange.fetchOhlcv(symbol, timeframe, limit);

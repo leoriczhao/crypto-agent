@@ -1,0 +1,202 @@
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { unlinkSync, existsSync } from "node:fs";
+import { Memory, type PersistedActivePosition } from "../src/memory.js";
+
+/**
+ * Unit tests for the new persistence tables added in Iteration 11.
+ * Each test uses a fresh temp DB file so they don't cross-contaminate.
+ */
+
+let dbPath: string;
+let memory: Memory;
+
+beforeEach(() => {
+  dbPath = join(tmpdir(), `crypto-persist-${randomUUID().slice(0, 8)}.db`);
+  memory = new Memory(dbPath);
+});
+
+afterEach(() => {
+  memory.close();
+  if (existsSync(dbPath)) try { unlinkSync(dbPath); } catch {}
+});
+
+describe("A0 — active_positions", () => {
+  test("save + load round-trip", () => {
+    const pos: PersistedActivePosition = {
+      ruleId: "rule-1",
+      symbol: "BTC/USDT",
+      side: "long",
+      entryPrice: 50000,
+      amount: 0.01,
+      stopLoss: 48500,
+      takeProfit: 52500,
+      enteredAt: 1700000000000,
+      source: "fast_path",
+    };
+    memory.saveActivePosition(pos);
+    const loaded = memory.loadActivePositions();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]).toMatchObject(pos);
+  });
+
+  test("save is upsert (same ruleId overwrites)", () => {
+    const base: PersistedActivePosition = {
+      ruleId: "r", symbol: "BTC/USDT", side: "long", entryPrice: 50000,
+      amount: 0.01, stopLoss: 48000, takeProfit: 52000, enteredAt: 1, source: "fast_path",
+    };
+    memory.saveActivePosition(base);
+    memory.saveActivePosition({ ...base, stopLoss: 49000 });
+    const loaded = memory.loadActivePositions();
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0].stopLoss).toBe(49000);
+  });
+
+  test("delete removes the row", () => {
+    memory.saveActivePosition({
+      ruleId: "r", symbol: "BTC/USDT", side: "long", entryPrice: 50000,
+      amount: 0.01, stopLoss: 48000, takeProfit: 52000, enteredAt: 1, source: "fast_path",
+    });
+    memory.deleteActivePosition("r");
+    expect(memory.loadActivePositions()).toHaveLength(0);
+  });
+
+  test("load returns entries ordered by enteredAt ascending", () => {
+    memory.saveActivePosition({
+      ruleId: "b", symbol: "BTC/USDT", side: "long", entryPrice: 1,
+      amount: 1, stopLoss: 1, takeProfit: 1, enteredAt: 200, source: "fast_path",
+    });
+    memory.saveActivePosition({
+      ruleId: "a", symbol: "ETH/USDT", side: "long", entryPrice: 1,
+      amount: 1, stopLoss: 1, takeProfit: 1, enteredAt: 100, source: "fast_path",
+    });
+    const loaded = memory.loadActivePositions();
+    expect(loaded.map((p) => p.ruleId)).toEqual(["a", "b"]);
+  });
+});
+
+describe("A1 — daily_pnl", () => {
+  test("getDailyPnl returns 0 for an unseen date", () => {
+    expect(memory.getDailyPnl("2099-01-01")).toBe(0);
+  });
+
+  test("addDailyPnl accumulates on the same date", () => {
+    memory.addDailyPnl("2026-04-16", -10);
+    memory.addDailyPnl("2026-04-16", -5);
+    memory.addDailyPnl("2026-04-16", +3);
+    expect(memory.getDailyPnl("2026-04-16")).toBeCloseTo(-12);
+  });
+
+  test("different dates are independent", () => {
+    memory.addDailyPnl("2026-04-15", -100);
+    memory.addDailyPnl("2026-04-16", +50);
+    expect(memory.getDailyPnl("2026-04-15")).toBe(-100);
+    expect(memory.getDailyPnl("2026-04-16")).toBe(50);
+  });
+
+  test("survives a Memory close/reopen (true persistence)", () => {
+    memory.addDailyPnl("2026-04-16", -42);
+    memory.close();
+    const reopened = new Memory(dbPath);
+    expect(reopened.getDailyPnl("2026-04-16")).toBe(-42);
+    reopened.close();
+  });
+});
+
+describe("A2 — pending_orders", () => {
+  test("create + update lifecycle", () => {
+    const id = memory.createPendingOrder({
+      sessionId: "s1",
+      symbol: "BTC/USDT",
+      side: "buy",
+      orderType: "limit",
+      price: 49000,
+      amount: 0.01,
+    });
+    expect(id).toBeGreaterThan(0);
+
+    memory.updatePendingOrder(id, { exchangeOrderId: "ex-123", status: "open" });
+    let open = memory.loadOpenPendingOrders();
+    expect(open).toHaveLength(1);
+    expect(open[0].exchangeOrderId).toBe("ex-123");
+    expect(open[0].status).toBe("open");
+
+    memory.updatePendingOrder(id, { status: "filled" });
+    open = memory.loadOpenPendingOrders();
+    expect(open).toHaveLength(0);
+  });
+
+  test("only returns 'open' status", () => {
+    const id1 = memory.createPendingOrder({
+      symbol: "BTC/USDT", side: "buy", orderType: "market", amount: 1,
+    });
+    const id2 = memory.createPendingOrder({
+      symbol: "ETH/USDT", side: "sell", orderType: "market", amount: 1,
+    });
+    memory.updatePendingOrder(id1, { status: "filled" });
+    // id2 stays open by default
+    const open = memory.loadOpenPendingOrders();
+    expect(open).toHaveLength(1);
+    expect(open[0].id).toBe(id2);
+  });
+});
+
+describe("A3 — portfolio_watermark", () => {
+  test("returns null before any update", () => {
+    expect(memory.getPortfolioWatermark()).toBeNull();
+  });
+
+  test("first update sets the peak", () => {
+    const wm = memory.updatePortfolioWatermark(10000);
+    expect(wm.peakValue).toBe(10000);
+    expect(memory.getPortfolioWatermark()!.peakValue).toBe(10000);
+  });
+
+  test("higher value lifts the peak", () => {
+    memory.updatePortfolioWatermark(10000);
+    const wm = memory.updatePortfolioWatermark(12000);
+    expect(wm.peakValue).toBe(12000);
+  });
+
+  test("lower value does NOT lower the peak (critical for drawdown)", () => {
+    memory.updatePortfolioWatermark(12000);
+    const wm = memory.updatePortfolioWatermark(8000);
+    expect(wm.peakValue).toBe(12000);
+    expect(memory.getPortfolioWatermark()!.peakValue).toBe(12000);
+  });
+});
+
+describe("B0 — daemon_state KV", () => {
+  test("returns null for unset key", () => {
+    expect(memory.getDaemonState("nonexistent")).toBeNull();
+  });
+
+  test("set + get round-trip", () => {
+    memory.setDaemonState("active_soul", "aggressive");
+    expect(memory.getDaemonState("active_soul")).toBe("aggressive");
+  });
+
+  test("set is upsert (same key overwrites)", () => {
+    memory.setDaemonState("active_soul", "conservative");
+    memory.setDaemonState("active_soul", "aggressive");
+    expect(memory.getDaemonState("active_soul")).toBe("aggressive");
+  });
+
+  test("delete removes the key", () => {
+    memory.setDaemonState("x", "1");
+    memory.deleteDaemonState("x");
+    expect(memory.getDaemonState("x")).toBeNull();
+  });
+
+  test("survives close/reopen", () => {
+    memory.setDaemonState("active_soul", "aggressive");
+    memory.setDaemonState("active_exchange", "okx");
+    memory.close();
+    const reopened = new Memory(dbPath);
+    expect(reopened.getDaemonState("active_soul")).toBe("aggressive");
+    expect(reopened.getDaemonState("active_exchange")).toBe("okx");
+    reopened.close();
+  });
+});

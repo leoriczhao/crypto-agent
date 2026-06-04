@@ -1,5 +1,5 @@
 import type { Memory, TradeRow } from "../memory.js";
-import type { StrategyStore } from "./state.js";
+import type { StrategyManager } from "./manager.js";
 
 const REVIEW_PROMPT_TEMPLATE = `You are a trading performance reviewer. Analyze these recent automated trades and provide actionable feedback.
 
@@ -23,11 +23,11 @@ Output your analysis concisely. For parameter changes, use the manage_rules or p
 
 export class TradeReviewer {
   private memory: Memory;
-  private store: StrategyStore;
+  private store: StrategyManager;
   private reviewIntervalTrades: number;
   private tradesSinceLastReview = 0;
 
-  constructor(memory: Memory, store: StrategyStore, reviewEveryNTrades = 10) {
+  constructor(memory: Memory, store: StrategyManager, reviewEveryNTrades = 10) {
     this.memory = memory;
     this.store = store;
     this.reviewIntervalTrades = reviewEveryNTrades;
@@ -40,19 +40,25 @@ export class TradeReviewer {
 
   buildReviewPrompt(tradeCount = 20): string {
     const trades = this.memory.getRecentTrades(tradeCount);
-    const rules = this.store.getAllRules();
+    const strategies = this.store.getAllStrategies();
     const riskParams = this.store.riskParams;
 
     const tradesText = trades.length
       ? trades.map((t) => formatTrade(t)).join("\n")
       : "(No trades recorded yet)";
 
-    const rulesText = rules.length
-      ? rules.map((r) => {
-        const status = r.enabled ? "ON" : "OFF";
-        return `[${status}] ${r.id.slice(0, 8)} | ${r.symbol} ${r.side} | $${r.positionSizeUsdt} | SL:${r.stopLossPct}% TP:${r.takeProfitPct}%`;
+    const rulesText = strategies.length
+      ? strategies.map((s) => {
+        const status = s.enabled ? "ON" : "OFF";
+        const p = s.params as Record<string, any>;
+        const side = p.side ?? "?";
+        const size = p.positionSizeUsdt ?? 0;
+        const sl = p.stopLossPct ?? 0;
+        const tp = p.takeProfitPct ?? 0;
+        const tf = p.timeframe ?? "?";
+        return `[${status}] ${s.id.slice(0, 8)} kind=${s.kind} | ${s.symbol}@${tf} ${side} | $${size} | SL:${sl}% TP:${tp}%`;
       }).join("\n")
-      : "(No rules configured)";
+      : "(No strategies configured)";
 
     const rpText = [
       `Max Position: ${riskParams.maxPositionPct}%`,

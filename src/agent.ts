@@ -4,17 +4,28 @@ import { config } from "./config.js";
 import { PaperExchange } from "./exchange/paper.js";
 import { LiveExchange } from "./exchange/live.js";
 import { ExchangeManager } from "./exchange/manager.js";
-import { TOOL_DEFINITIONS, TOOL_HANDLERS } from "./tools/registry.js";
+import { TOOL_DEFINITIONS, TOOL_HANDLERS, TOOL_DEPS } from "./tools/registry.js";
 import { Soul } from "./soul.js";
 import { SkillLoader } from "./skill-loader.js";
 import { SessionManager } from "./session.js";
 import { microCompact, autoCompact } from "./context.js";
 import { openaiChatCompletionKwargs, anthropicMessageKwargs } from "./llm/provider.js";
+import { buildWorldSnapshot } from "./world-snapshot.js";
 import type { Memory } from "./memory.js";
-import type { StrategyStore } from "./strategy/state.js";
+import type { StrategyManager } from "./strategy/manager.js";
 import "./tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+interface ChatCallbacks {
+  onDelta?: (text: string) => void;
+  onToolUse?: (name: string) => void;
+  signal?: AbortSignal;
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error("Cancelled");
+}
 const SKILLS_DIR = join(__dirname, "..", "skills");
 
 const SYSTEM_BASE = `You are a crypto trading agent operating on real exchanges via ccxt.
@@ -46,21 +57,21 @@ export class CryptoAgent {
   skillLoader: SkillLoader;
   sessions: SessionManager;
   memory: Memory | null = null;
-  strategyStore: StrategyStore | null = null;
+  strategyStore: StrategyManager | null = null;
   provider: string;
   client: any;
 
   constructor() {
     this.exchangeManager = new ExchangeManager();
     const defaultEx = config.paperTrading
-      ? new PaperExchange(config.defaultExchange, config.initialBalance)
-      : new LiveExchange(config.defaultExchange, config.exchangeApiKey, config.exchangeSecret, config.exchangePassword);
+      ? new PaperExchange(config.defaultExchange, config.initialBalance, config.httpsProxy)
+      : new LiveExchange(config.defaultExchange, config.exchangeApiKey, config.exchangeSecret, config.exchangePassword, config.httpsProxy);
     this.exchangeManager.register(config.defaultExchange, defaultEx);
 
     for (const [exId, creds] of Object.entries(config.extraExchanges)) {
       const ex = config.paperTrading
-        ? new PaperExchange(exId, config.initialBalance)
-        : new LiveExchange(exId, creds.api_key ?? "", creds.secret ?? "");
+        ? new PaperExchange(exId, config.initialBalance, config.httpsProxy)
+        : new LiveExchange(exId, creds.api_key ?? "", creds.secret ?? "", "", config.httpsProxy);
       this.exchangeManager.register(exId, ex);
     }
 
@@ -105,34 +116,59 @@ export class CryptoAgent {
     const handler = TOOL_HANDLERS[name];
     if (!handler) return `Unknown tool: ${name}`;
 
-    if (name === "switch_exchange") return handler({ exchange_manager: this.exchangeManager, ...inputs });
-    if (name === "delegate") return handler({ agent: this, sessionId, ...inputs });
-    if (name === "switch_soul") return handler({ soul: this.soul, ...inputs });
-    if (name === "load_skill") return handler({ skill_loader: this.skillLoader, ...inputs });
-    if (name === "compact") return handler({ agent: this, sessionId, ...inputs });
-    if (name === "session") return handler({ agent: this, ...inputs });
-    if (name === "plan_strategy" || name === "manage_rules")
-      return handler({ strategy_store: this.strategyStore, ...inputs });
-    if (name === "schedule") return handler({ ...inputs });
-    if (["buy", "sell", "assess_risk"].includes(name))
-      return handler({ exchange: this.exchange, config, memory: this.memory, sessionId, ...inputs });
-    return handler({ exchange: this.exchange, ...inputs });
+    const deps = TOOL_DEPS[name] ?? [];
+    const depMap: Record<string, () => any> = {
+      exchange: () => this.exchange,
+      config: () => config,
+      memory: () => this.memory,
+      sessionId: () => sessionId,
+      soul: () => this.soul.profile,
+      exchange_manager: () => this.exchangeManager,
+      agent: () => this,
+      skill_loader: () => this.skillLoader,
+      strategy_store: () => this.strategyStore,
+    };
+    const resolved: Record<string, any> = {};
+    for (const d of deps) resolved[d] = depMap[d]?.();
+    return handler({ ...resolved, ...inputs });
+  }
+
+  private async buildFullSystemPrompt(): Promise<string> {
+    let prompt = this.systemPrompt;
+    if (config.worldSnapshotEnabled) {
+      try {
+        const snapshot = await buildWorldSnapshot(this.exchange, {
+          paperTrading: config.paperTrading,
+          strategyStore: this.strategyStore,
+        });
+        prompt += `\n\n## Current State\n${snapshot}`;
+      } catch {
+        // Snapshot failure is non-fatal — LLM can still use tools to observe
+      }
+    }
+    return prompt;
   }
 
   async chatInSession(
     sessionId: string,
     userMessage: string,
-    callbacks: { onDelta?: (text: string) => void; onToolUse?: (name: string) => void } = {},
+    callbacks: ChatCallbacks = {},
   ): Promise<string> {
     await this.initClient();
+    throwIfCancelled(callbacks.signal);
     const session = this.sessions.get(sessionId);
     session.messages.push({ role: "user", content: userMessage });
     session.messages = microCompact(session.messages);
-    session.messages = await autoCompact(session.messages, this.client, this.provider);
+    session.messages = await autoCompact(session.messages, this.client, this.provider, null, {
+      signal: callbacks.signal,
+    });
+    throwIfCancelled(callbacks.signal);
     session.lastActiveAt = new Date();
 
-    if (this.provider === "openai") return this.streamOpenai(session.messages, sessionId, callbacks);
-    return this.streamAnthropic(session.messages, sessionId, callbacks);
+    const sysPrompt = await this.buildFullSystemPrompt();
+    throwIfCancelled(callbacks.signal);
+    if (this.provider === "openai") return this.streamOpenai(session.messages, sessionId, callbacks, sysPrompt);
+    return this.streamAnthropic(session.messages, sessionId, callbacks, sysPrompt);
   }
 
   async chat(userMessage: string): Promise<string> {
@@ -141,7 +177,7 @@ export class CryptoAgent {
 
   async chatStream(
     userMessage: string,
-    callbacks: { onDelta?: (text: string) => void; onToolUse?: (name: string) => void } = {},
+    callbacks: ChatCallbacks = {},
   ): Promise<string> {
     return this.chatInSession(this.sessions.activeId, userMessage, callbacks);
   }
@@ -149,28 +185,32 @@ export class CryptoAgent {
   private async streamOpenai(
     messages: any[],
     sessionId: string,
-    cb: { onDelta?: (t: string) => void; onToolUse?: (n: string) => void },
+    cb: ChatCallbacks,
+    sysPrompt?: string,
   ): Promise<string> {
     const tools = openaiTools();
     const baseKw = openaiChatCompletionKwargs(config);
+    const systemContent = sysPrompt ?? this.systemPrompt;
 
     while (true) {
+      throwIfCancelled(cb.signal);
       const stream = await this.client.chat.completions.create({
-        messages: [{ role: "system", content: this.systemPrompt }, ...messages],
+        messages: [{ role: "system", content: systemContent }, ...messages],
         tools,
         stream: true,
         ...baseKw,
-      });
+      }, { signal: cb.signal });
 
       let fullContent = "";
       const tcMap: Record<number, { id: string; function: { name: string; arguments: string } }> = {};
 
       for await (const chunk of stream) {
+        throwIfCancelled(cb.signal);
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) continue;
         if (delta.content) {
           fullContent += delta.content;
-          cb.onDelta?.(fullContent);
+          if (!cb.signal?.aborted) cb.onDelta?.(fullContent);
         }
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
@@ -200,9 +240,11 @@ export class CryptoAgent {
       });
 
       for (const tc of toolCalls) {
+        throwIfCancelled(cb.signal);
         cb.onToolUse?.(tc.function.name);
         const args = JSON.parse(tc.function.arguments);
         const output = await this.dispatchTool(tc.function.name, args, sessionId);
+        throwIfCancelled(cb.signal);
         messages.push({ role: "tool", tool_call_id: tc.id, content: output });
       }
     }
@@ -211,25 +253,30 @@ export class CryptoAgent {
   private async streamAnthropic(
     messages: any[],
     sessionId: string,
-    cb: { onDelta?: (t: string) => void; onToolUse?: (n: string) => void },
+    cb: ChatCallbacks,
+    sysPrompt?: string,
   ): Promise<string> {
     const baseKw = anthropicMessageKwargs(config);
+    const systemContent = sysPrompt ?? this.systemPrompt;
 
     while (true) {
+      throwIfCancelled(cb.signal);
       const stream = this.client.messages.stream({
-        system: this.systemPrompt,
+        system: systemContent,
         messages,
         tools: TOOL_DEFINITIONS,
         ...baseKw,
-      });
+      }, { signal: cb.signal });
 
       let fullText = "";
       stream.on("text", (text: string) => {
+        if (cb.signal?.aborted) return;
         fullText += text;
         cb.onDelta?.(fullText);
       });
 
       const response = await stream.finalMessage();
+      throwIfCancelled(cb.signal);
       messages.push({ role: "assistant", content: response.content });
 
       if (response.stop_reason !== "tool_use") {
@@ -239,8 +286,10 @@ export class CryptoAgent {
       const results: any[] = [];
       for (const block of response.content) {
         if (block.type === "tool_use") {
+          throwIfCancelled(cb.signal);
           cb.onToolUse?.(block.name);
           const output = await this.dispatchTool(block.name, block.input, sessionId);
+          throwIfCancelled(cb.signal);
           results.push({ type: "tool_result", tool_use_id: block.id, content: output });
         }
       }

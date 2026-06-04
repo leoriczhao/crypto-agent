@@ -1,5 +1,8 @@
 import type { BaseExchange } from "../exchange/base.js";
-import type { Signal, StrategyStore } from "./state.js";
+import type { Signal } from "./state.js";
+import type { StrategyManager } from "./manager.js";
+import type { Memory } from "../memory.js";
+import { checkTradeAllowed } from "../trade-guard.js";
 
 export interface RiskDecision {
   approved: boolean;
@@ -7,99 +10,104 @@ export interface RiskDecision {
   reason?: string;
 }
 
+/**
+ * Fast-path risk gate. Delegates to the shared `checkTradeAllowed()` so both
+ * the LLM-driven trade tools and the automated signal engine use identical
+ * risk logic. Daily PnL and peak portfolio watermark are persisted via the
+ * optional Memory dependency so they survive daemon restarts (closing the
+ * "restart resets daily loss cap" loophole).
+ */
 export class RiskGate {
-  private store: StrategyStore;
+  private store: StrategyManager;
   private exchange: BaseExchange;
-  private dailyPnl = 0;
-  private dailyResetDate = "";
+  private memory: Memory | null;
   private initialPortfolioValue: number;
+  /** Fast-path rules are automated (no Soul context). Cap at riskParams only. */
+  private readonly soulMaxPositionPct = 100;
 
-  constructor(store: StrategyStore, exchange: BaseExchange, initialPortfolioValue: number) {
+  constructor(
+    store: StrategyManager,
+    exchange: BaseExchange,
+    initialPortfolioValue: number,
+    memory: Memory | null = null,
+  ) {
     this.store = store;
     this.exchange = exchange;
+    this.memory = memory;
     this.initialPortfolioValue = initialPortfolioValue;
   }
 
   async evaluate(signal: Signal): Promise<RiskDecision> {
-    const params = this.store.riskParams;
-    this.resetDailyIfNeeded();
+    const today = this.todayKey();
+    const dailyPnl = this.memory ? this.memory.getDailyPnl(today) : 0;
 
-    try {
-      const balance = await this.exchange.fetchBalance();
-      const positions = await this.exchange.fetchPositions();
-
-      const usdtFree = balance.USDT?.total ?? balance.USDT?.free ?? 0;
-      let totalExposure = 0;
-      let positionCount = 0;
-
-      for (const pos of Object.values(positions) as any[]) {
-        const value = Math.abs((pos.amount ?? 0) * (pos.current_price ?? pos.avg_entry_price ?? 0));
-        if (value > 0) {
-          totalExposure += value;
-          positionCount++;
-        }
-      }
-
-      const portfolioValue = usdtFree + totalExposure;
-
-      if (signal.action === "enter") {
-        const newPositionPct = portfolioValue > 0 ? (signal.sizeUsdt / portfolioValue) * 100 : 100;
-        if (newPositionPct > params.maxPositionPct) {
-          return this.reject(signal, `Position size ${newPositionPct.toFixed(1)}% exceeds max ${params.maxPositionPct}%`);
-        }
-
-        const newExposurePct = portfolioValue > 0
-          ? ((totalExposure + signal.sizeUsdt) / portfolioValue) * 100
-          : 100;
-        if (newExposurePct > params.maxExposurePct) {
-          return this.reject(signal, `Exposure would be ${newExposurePct.toFixed(1)}%, exceeds max ${params.maxExposurePct}%`);
-        }
-
-        if (positionCount >= params.maxConcurrentPositions) {
-          return this.reject(signal, `Already ${positionCount} positions, max is ${params.maxConcurrentPositions}`);
-        }
-
-        if (signal.sizeUsdt > usdtFree) {
-          return this.reject(signal, `Insufficient balance: need $${signal.sizeUsdt.toFixed(2)}, have $${usdtFree.toFixed(2)}`);
-        }
-      }
-
-      const drawdownPct = this.initialPortfolioValue > 0
-        ? ((this.initialPortfolioValue - portfolioValue) / this.initialPortfolioValue) * 100
-        : 0;
-      if (drawdownPct > params.maxDrawdownPct) {
-        return this.reject(signal, `Drawdown ${drawdownPct.toFixed(1)}% exceeds max ${params.maxDrawdownPct}% — emergency`);
-      }
-
-      if (Math.abs(this.dailyPnl) > 0) {
-        const dailyLossPct = this.initialPortfolioValue > 0
-          ? (Math.abs(Math.min(0, this.dailyPnl)) / this.initialPortfolioValue) * 100
-          : 0;
-        if (dailyLossPct > params.maxDailyLossPct) {
-          return this.reject(signal, `Daily loss ${dailyLossPct.toFixed(1)}% exceeds max ${params.maxDailyLossPct}%`);
-        }
-      }
-
-      return { approved: true, signal };
-    } catch (err: any) {
-      return this.reject(signal, `Risk check error: ${err.message ?? err}`);
+    // Peak watermark acts as the drawdown baseline. If nothing is stored yet,
+    // use the configured initial balance as the floor.
+    let peakValue = this.initialPortfolioValue;
+    if (this.memory) {
+      const wm = this.memory.getPortfolioWatermark();
+      if (wm) peakValue = Math.max(peakValue, wm.peakValue);
     }
+
+    // Budget attribution: signal.ruleId == strategy.id for fast-path signals.
+    const owner = this.store.getStrategy(signal.ruleId);
+    const strategyAllocatedUsdt = owner?.allocatedUsdt;
+    const strategyUsedUsdt = owner ? this.store.getUsedUsdt(owner.id) : undefined;
+
+    const result = await checkTradeAllowed(
+      {
+        exchange: this.exchange,
+        riskParams: this.store.riskParams,
+        soulMaxPositionPct: this.soulMaxPositionPct,
+        maxOrderSizeUsdt: Number.POSITIVE_INFINITY, // rule-defined size; no hard cap here
+        initialBalanceUsdt: peakValue,
+        dailyPnl,
+        strategyId: owner?.id,
+        strategyAllocatedUsdt: strategyAllocatedUsdt && strategyAllocatedUsdt > 0 ? strategyAllocatedUsdt : undefined,
+        strategyUsedUsdt,
+      },
+      signal.symbol,
+      signal.action === "enter" ? "buy" : "sell",
+      signal.sizeUsdt,
+    );
+
+    // Keep the peak watermark fresh while we're already querying balance/positions
+    this.updatePeakFromLiveState().catch(() => {});
+
+    if (!result.allowed) {
+      return { approved: false, signal, reason: result.reason };
+    }
+    return { approved: true, signal };
   }
 
   recordPnl(amount: number): void {
-    this.resetDailyIfNeeded();
-    this.dailyPnl += amount;
-  }
-
-  private resetDailyIfNeeded(): void {
-    const today = new Date().toISOString().slice(0, 10);
-    if (this.dailyResetDate !== today) {
-      this.dailyPnl = 0;
-      this.dailyResetDate = today;
+    if (this.memory) {
+      this.memory.addDailyPnl(this.todayKey(), amount);
     }
   }
 
-  private reject(signal: Signal, reason: string): RiskDecision {
-    return { approved: false, signal, reason };
+  /**
+   * Query current portfolio value and lift the watermark if we've set a new high.
+   * Called opportunistically after each evaluate().
+   */
+  async updatePeakFromLiveState(): Promise<void> {
+    if (!this.memory) return;
+    try {
+      const balance = await this.exchange.fetchBalance();
+      const positions = await this.exchange.fetchPositions();
+      const usdtFree = balance.USDT?.free ?? balance.USDT?.total ?? 0;
+      let exposure = 0;
+      for (const pos of Object.values(positions) as any[]) {
+        exposure += Math.abs((pos.amount ?? 0) * (pos.current_price ?? pos.avg_entry_price ?? 0));
+      }
+      const portfolio = usdtFree + exposure;
+      if (portfolio > 0) this.memory.updatePortfolioWatermark(portfolio);
+    } catch {
+      // ignore — next evaluate() will try again
+    }
+  }
+
+  private todayKey(): string {
+    return new Date().toISOString().slice(0, 10);
   }
 }

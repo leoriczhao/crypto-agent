@@ -1,4 +1,6 @@
 import { computeSma, computeRsi, computeBollinger } from "./indicators.js";
+import { evalCondition, type IndicatorSnapshot } from "./strategy/evaluator.js";
+import type { Condition } from "./strategy/state.js";
 
 export interface BacktestResult {
   strategy: string;
@@ -15,6 +17,7 @@ export interface BacktestResult {
 
 interface OhlcvBar {
   close: number;
+  volume?: number;
   [key: string]: any;
 }
 
@@ -43,6 +46,60 @@ export class BacktestEngine {
     }
     const [trades, equity] = strategies[strategy](ohlcv, p);
     return this.buildResult(strategy, symbol, timeframe, trades, equity);
+  }
+
+  /**
+   * Run a backtest using the same Condition[] evaluation logic as SignalEngine.
+   * This ensures backtest results match live strategy execution exactly.
+   */
+  runConditionBased(
+    ohlcv: OhlcvBar[],
+    entry: Condition[],
+    exit: Condition[],
+    side: "long" | "short" = "long",
+    symbol = "",
+    timeframe = "",
+  ): BacktestResult {
+    const closes = ohlcv.map((b) => b.close);
+    let cash = this.initialCapital;
+    let position = 0;
+    const trades: any[] = [];
+    const equity: number[] = [];
+    const warmup = 50; // same minimum as SignalEngine
+
+    for (let i = warmup; i < ohlcv.length; i++) {
+      const price = closes[i];
+      const window = closes.slice(0, i + 1);
+      const prevWindow = closes.slice(0, i);
+      const snap: IndicatorSnapshot = {
+        closes: window,
+        lastPrice: price,
+        lastVolume: ohlcv[i].volume ?? 0,
+        prevSma20: computeSma(prevWindow, 20),
+        prevSma50: computeSma(prevWindow, 50),
+      };
+
+      if (position === 0) {
+        const entryMet = entry.every((c) => evalCondition(c, snap));
+        if (entryMet) {
+          const qty = cash / price;
+          position = side === "long" ? qty : -qty;
+          cash = 0;
+          trades.push({ side: "buy", price, quantity: Math.abs(position), index: i });
+        }
+      } else {
+        const exitMet = exit.every((c) => evalCondition(c, snap));
+        if (exitMet) {
+          cash = Math.abs(position) * price;
+          trades.push({ side: "sell", price, quantity: Math.abs(position), index: i });
+          position = 0;
+        }
+      }
+
+      equity.push(cash + Math.abs(position) * price);
+    }
+    this.closeOpenPosition(closes, Math.abs(position), cash, trades, equity);
+    return this.buildResult("condition_based", symbol, timeframe, trades, equity);
   }
 
   private runSmaCrossover(ohlcv: OhlcvBar[], params: Record<string, any>): [any[], number[]] {

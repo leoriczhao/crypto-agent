@@ -56,9 +56,11 @@ export async function autoCompact(
   client: any,
   provider: string,
   transcriptDir?: string | null,
-  opts?: { force?: boolean; sessionId?: string },
+  opts?: { force?: boolean; sessionId?: string; signal?: AbortSignal },
 ): Promise<any[]> {
   const force = opts?.force ?? false;
+  const signal = opts?.signal;
+  if (signal?.aborted) throw new Error("Cancelled");
   if (!force && !config.autoCompactEnabled) return messages;
 
   const tokens = estimateTokens(messages);
@@ -98,17 +100,18 @@ export async function autoCompact(
       const resp = await client.chat.completions.create({
         messages: [{ role: "user", content: summaryPrompt }],
         ...kwargs,
-      });
+      }, { signal });
       summary = resp.choices[0].message.content;
     } else {
       const kwargs = compactSummaryAnthropicKwargs(config);
       const resp = await client.messages.create({
         messages: [{ role: "user", content: summaryPrompt }],
         ...kwargs,
-      });
+      }, { signal });
       summary = resp.content[0].text;
     }
   } catch (e: any) {
+    if (signal?.aborted) throw new Error("Cancelled");
     summary = `(auto-compact failed: ${e.message ?? e}. Keeping last 10 messages.)`;
     return messages.slice(-10);
   }

@@ -10,7 +10,8 @@ registerTool(
     },
     required: [],
   },
-  async ({ exchange_manager, exchange_id = "" }) => {
+  ["exchange_manager", "memory"],
+  async ({ exchange_manager, memory, exchange_id = "" }) => {
     try {
       const exchanges = exchange_manager.list();
       const active = exchange_manager.activeId;
@@ -35,6 +36,7 @@ registerTool(
       }
 
       exchange_manager.setActive(exchange_id);
+      memory?.setDaemonState("active_exchange", exchange_id);
       return `Switched active exchange to: ${exchange_id}`;
     } catch (e: any) {
       return `Error: ${e.message ?? e}`;

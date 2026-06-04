@@ -4,6 +4,7 @@ registerTool(
   "assess_risk",
   "Assess portfolio risk: exposure, concentration, drawdown, and current risk limits.",
   { type: "object", properties: {} },
+  ["exchange", "config"],
   async ({ exchange, config }) => {
     try {
       const balance = await exchange.fetchBalance();

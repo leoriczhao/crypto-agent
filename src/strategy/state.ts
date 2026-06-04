@@ -17,6 +17,7 @@ export interface Condition {
 export interface StrategyRule {
   id: string;
   symbol: string;
+  timeframe: string; // "1m" | "5m" | "15m" | "1h" | "4h" | "1d" — must match the backtest timeframe used to validate this rule
   side: "long" | "short";
   entry: Condition[];
   exit: Condition[];
@@ -49,6 +50,8 @@ export const DEFAULT_RISK_PARAMS: RiskParams = {
 // ── Signal: output of SignalEngine, input to RiskGate ───────────────────
 
 export interface Signal {
+  /** Owning Strategy id. Same value in every signal from one strategy — used
+   * for budget attribution, event routing, and strategyId in trades/positions. */
   ruleId: string;
   symbol: string;
   side: "long" | "short";
@@ -56,16 +59,34 @@ export interface Signal {
   sizeUsdt: number;
   reason: string;
   timestamp: number;
+  /** Unique position id for this leg. Defaults to ruleId when a strategy
+   * only ever holds one position at a time (SignalStrategy). Strategies that
+   * run multiple simultaneous positions (Ladder, future Grid) generate
+   * distinct positionIds per leg so OrderExecutor can track them separately. */
+  positionId?: string;
+  /** Optional per-signal SL/TP in percent. Set by strategies that compute
+   * their own exit bands (e.g. SignalStrategy). Absent = executor relies on
+   * strategy-emitted exit signals. */
+  stopLossPct?: number;
+  takeProfitPct?: number;
+  /** How the executor should submit this order. Default "market" = fill at
+   * current ticker. "limit" requires a limitPrice and rests on the book
+   * until price touches (or until the strategy cancels). */
+  orderType?: "market" | "limit";
+  limitPrice?: number;
 }
 
 // ── StrategyStore: in-memory + SQLite persistence ───────────────────────
 
-export class StrategyStore {
+import { EventEmitter } from "node:events";
+
+export class StrategyStore extends EventEmitter {
   private rules = new Map<string, StrategyRule>();
   private _riskParams: RiskParams = { ...DEFAULT_RISK_PARAMS };
   private persistence: StrategyPersistence | null = null;
 
   constructor(persistence?: StrategyPersistence) {
+    super();
     this.persistence = persistence ?? null;
     if (this.persistence) this.loadFromDb();
   }
@@ -84,6 +105,7 @@ export class StrategyStore {
     const full: StrategyRule = { id: randomUUID(), createdAt: now, updatedAt: now, ...rule };
     this.rules.set(full.id, full);
     this.persistence?.saveRule(full);
+    this.emit("ruleAdded", full);
     return full;
   }
 
@@ -98,7 +120,10 @@ export class StrategyStore {
 
   removeRule(id: string): boolean {
     const ok = this.rules.delete(id);
-    if (ok) this.persistence?.deleteRule(id);
+    if (ok) {
+      this.persistence?.deleteRule(id);
+      this.emit("ruleRemoved", id);
+    }
     return ok;
   }
 
@@ -120,6 +145,13 @@ export class StrategyStore {
     const rp = this.persistence.loadRiskParams();
     if (rp) this._riskParams = rp;
     for (const rule of this.persistence.loadAllRules()) {
+      if (!rule.timeframe) {
+        // Legacy rules predate the timeframe field. Default to 1h and warn — the operator
+        // should /delete_rule and re-run /research so the rule carries the timeframe the
+        // strategist actually validated.
+        rule.timeframe = "1h";
+        console.warn(`[StrategyStore] rule ${rule.id.slice(0, 8)} has no timeframe; defaulted to 1h. Delete and re-create it for correct evaluation.`);
+      }
       this.rules.set(rule.id, rule);
     }
   }

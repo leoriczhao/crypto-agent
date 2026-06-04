@@ -80,6 +80,7 @@ registerTool(
     },
     required: [],
   },
+  [],
   async ({ chain = "bitcoin" }) => {
     try {
       if (chain === "bitcoin") {

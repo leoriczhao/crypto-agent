@@ -16,6 +16,7 @@ registerTool(
     },
     required: ["action"],
   },
+  ["agent"],
   async ({ agent, action, name, session_id }) => {
     try {
       const mgr = agent.sessions;

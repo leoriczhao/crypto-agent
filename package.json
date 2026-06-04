@@ -1,8 +1,8 @@
 {
   "name": "crypto-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "LLM + quantitative crypto trading agent with paper trading support",
+  "description": "LLM + quantitative crypto trading agent with paper trading support (client-server architecture)",
   "bin": {
     "crypto-agent": "dist/cli.js",
     "crypto-daemon": "dist/daemon.js"
@@ -11,6 +11,9 @@
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "dev:daemon": "tsx src/daemon.ts",
+    "daemon": "tsx src/daemon.ts",
+    "install:service": "bash scripts/install-daemon.sh",
+    "uninstall:service": "bash scripts/uninstall-daemon.sh",
     "test": "vitest run",
     "test:watch": "vitest"
   },

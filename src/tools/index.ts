@@ -17,4 +17,8 @@ import "./switch-soul.js";
 import "./schedule.js";
 import "./session.js";
 import "./plan-strategy.js";
+import "./plan-ladder-strategy.js";
+import "./plan-grid-strategy.js";
 import "./manage-rules.js";
+import "./kb-log.js";
+import "./kb-search.js";

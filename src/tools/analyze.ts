@@ -12,6 +12,7 @@ registerTool(
     },
     required: [],
   },
+  ["exchange"],
   async ({ exchange, symbol = "BTC/USDT", timeframe = "1h" }) => {
     try {
       const klines = await exchange.fetchOhlcv(symbol, timeframe, 100);

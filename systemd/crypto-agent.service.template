@@ -1,0 +1,32 @@
+[Unit]
+Description=Crypto trading agent daemon
+Documentation=https://github.com/leoriczhao/crypto-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__NODE_BIN__ __PROJECT_DIR__/dist/daemon.js
+EnvironmentFile=__PROJECT_DIR__/.env
+
+# Logs (user-writable state dir)
+StandardOutput=append:__STATE_DIR__/daemon.log
+StandardError=append:__STATE_DIR__/daemon.err
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Give the daemon time to flush SQLite + close CCXT connections
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Minimal hardening (runs as the invoking user, not root)
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target

@@ -2,19 +2,49 @@ import { registerTool } from "./registry.js";
 
 registerTool(
   "backtest",
-  "Backtest a trading strategy on historical data.\nStrategies: sma_crossover, rsi_reversal, bollinger_bounce\nReturns: total return, max drawdown, Sharpe ratio, win rate, trade count",
+  "Backtest a trading strategy on historical data.\nNamed strategies: sma_crossover, rsi_reversal, bollinger_bounce\nOr provide entry_conditions/exit_conditions arrays to test the same rules used by plan_strategy.\nReturns: total return, max drawdown, Sharpe ratio, win rate, trade count",
   {
     type: "object",
     properties: {
-      strategy: { type: "string", enum: ["sma_crossover", "rsi_reversal", "bollinger_bounce"] },
+      strategy: { type: "string", enum: ["sma_crossover", "rsi_reversal", "bollinger_bounce"], description: "Named strategy (or omit if using conditions)" },
       symbol: { type: "string", default: "BTC/USDT" },
       timeframe: { type: "string", default: "1h" },
       limit: { type: "integer", description: "Number of historical candles (max 500)", default: 200 },
       params: { type: "object", description: 'Strategy parameters, e.g. {"short_period": 10, "long_period": 30}' },
+      entry_conditions: {
+        type: "array",
+        description: "Entry conditions (same format as plan_strategy)",
+        items: {
+          type: "object",
+          properties: {
+            indicator: { type: "string", enum: ["rsi", "sma_cross", "bollinger", "price_level", "volume"] },
+            operator: { type: "string", enum: ["gt", "lt", "gte", "lte", "cross_above", "cross_below"] },
+            value: { type: "number" },
+            params: { type: "object" },
+          },
+          required: ["indicator", "operator", "value"],
+        },
+      },
+      exit_conditions: {
+        type: "array",
+        description: "Exit conditions (same format as plan_strategy)",
+        items: {
+          type: "object",
+          properties: {
+            indicator: { type: "string", enum: ["rsi", "sma_cross", "bollinger", "price_level", "volume"] },
+            operator: { type: "string", enum: ["gt", "lt", "gte", "lte", "cross_above", "cross_below"] },
+            value: { type: "number" },
+            params: { type: "object" },
+          },
+          required: ["indicator", "operator", "value"],
+        },
+      },
+      side: { type: "string", enum: ["long", "short"], default: "long" },
     },
-    required: ["strategy"],
+    required: [],
   },
-  async ({ exchange, strategy, symbol = "BTC/USDT", timeframe = "1h", limit = 200, params }) => {
+  ["exchange"],
+  async ({ exchange, strategy, symbol = "BTC/USDT", timeframe = "1h", limit = 200, params, entry_conditions, exit_conditions, side = "long" }) => {
     const { BacktestEngine } = await import("../backtest.js");
     try {
       limit = Math.min(limit, 500);
@@ -22,7 +52,9 @@ registerTool(
       if (ohlcv.length < 30) return `Insufficient data: got ${ohlcv.length} candles, need at least 30.`;
 
       const engine = new BacktestEngine(10000);
-      const result = engine.run(ohlcv, strategy, params, symbol, timeframe);
+      const result = (entry_conditions && exit_conditions)
+        ? engine.runConditionBased(ohlcv, entry_conditions, exit_conditions, side, symbol, timeframe)
+        : engine.run(ohlcv, strategy ?? "sma_crossover", params, symbol, timeframe);
 
       const lines = [
         `Backtest Results: ${strategy} on ${symbol} (${timeframe})`,

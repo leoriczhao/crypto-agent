@@ -8,8 +8,22 @@ If nothing needs attention, respond briefly with "All clear."
 If action is needed, take it and report what you did.
 `;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export class HeartbeatScheduler {
@@ -19,6 +33,7 @@ export class HeartbeatScheduler {
   private onResponse: ((msg: string) => Promise<void>) | null;
   private running = false;
   private loopPromise: Promise<void> | null = null;
+  private abortController: AbortController | null = null;
 
   constructor(
     agent: any,
@@ -34,12 +49,13 @@ export class HeartbeatScheduler {
 
   async start(): Promise<void> {
     this.running = true;
+    this.abortController = new AbortController();
     this.loopPromise = this.loop();
   }
 
   private async loop(): Promise<void> {
     while (this.running) {
-      await sleep(this.interval * 1000);
+      await sleep(this.interval * 1000, this.abortController?.signal);
       if (!this.running) break;
       try {
         const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -58,8 +74,10 @@ export class HeartbeatScheduler {
 
   async stop(): Promise<void> {
     this.running = false;
+    this.abortController?.abort();
     if (this.loopPromise) {
       await this.loopPromise.catch(() => {});
     }
+    this.abortController = null;
   }
 }

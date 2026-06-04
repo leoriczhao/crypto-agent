@@ -11,6 +11,7 @@ registerTool(
       delete_id: { type: "integer", description: "Job ID to delete" },
     },
   },
+  ["memory"],
   async ({ memory, description = "", interval_minutes = 60, delete_id = 0 }) => {
     try {
       if (delete_id) {

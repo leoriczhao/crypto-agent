@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { CryptoAgent } from "../agent.js";
+import { IpcClient, type ChatHandle } from "../ipc/client.js";
+import type { ServerMessage } from "../ipc/protocol.js";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -7,90 +8,110 @@ export interface ChatMessage {
   timestamp?: Date;
 }
 
-export function useChat() {
-  const agentRef = useRef<CryptoAgent | null>(null);
+export interface DaemonInfo {
+  mode: "PAPER" | "LIVE";
+  exchange: string;
+  soul: string;
+  daemonPid: number;
+  heartbeatInterval: number;
+  fastPath: "running" | "idle" | "off";
+}
+
+export interface UseChatReturn {
+  messages: ChatMessage[];
+  isLoading: boolean;
+  sendMessage: (text: string) => void;
+  connected: boolean;
+  info: DaemonInfo | null;
+  activeSession: string;
+  cancel: () => void;
+  shutdown: () => void;
+}
+
+/**
+ * React hook that owns the IpcClient and exposes a chat-like state model.
+ * Sessions and slash commands are all delegated to the daemon — this hook
+ * never touches CryptoAgent directly.
+ */
+export function useChat(): UseChatReturn {
+  const clientRef = useRef<IpcClient | null>(null);
+  const activeChatRef = useRef<ChatHandle | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    const agent = new CryptoAgent();
-    agent.sessions.create("tui", "user");
-    agentRef.current = agent;
-    return () => {
-      agentRef.current?.close();
-    };
-  }, []);
+  const [connected, setConnected] = useState(false);
+  const [info, setInfo] = useState<DaemonInfo | null>(null);
+  const [activeSession, setActiveSession] = useState("user");
 
   const sysMsg = useCallback((text: string) => {
     setMessages((prev) => [...prev, { role: "system", content: text, timestamp: new Date() }]);
   }, []);
 
+  useEffect(() => {
+    const client = new IpcClient();
+    clientRef.current = client;
+
+    client.on("connected", (w: Extract<ServerMessage, { type: "welcome" }>) => {
+      setConnected(true);
+      setInfo({
+        mode: w.mode,
+        exchange: w.exchange,
+        soul: w.soul,
+        daemonPid: w.daemonPid,
+        heartbeatInterval: w.heartbeatInterval,
+        fastPath: w.fastPath,
+      });
+      sysMsg(`Connected to daemon (pid ${w.daemonPid})`);
+    });
+
+    client.on("disconnected", () => {
+      setConnected(false);
+      sysMsg("Disconnected from daemon — retrying...");
+    });
+
+    client.on("event", (ev: Extract<ServerMessage, { type: "event" }>) => {
+      sysMsg(formatEvent(ev));
+    });
+
+    client.on("shutdown", (reason: string) => {
+      sysMsg(`Daemon shutting down: ${reason}`);
+    });
+
+    client.on("server_error", (msg: string) => {
+      sysMsg(`[server error] ${msg}`);
+    });
+
+    client.connect().catch((err) => {
+      sysMsg(`Cannot connect to daemon: ${err.message ?? err}. Start it with \`npm run daemon\`.`);
+    });
+
+    return () => {
+      client.close();
+    };
+  }, [sysMsg]);
+
   const handleSlash = useCallback(
-    (input: string): boolean => {
-      const agent = agentRef.current;
-      if (!agent) return false;
+    async (input: string): Promise<void> => {
+      const client = clientRef.current;
+      if (!client || !client.isConnected()) {
+        sysMsg("Not connected to daemon.");
+        return;
+      }
+      try {
+        const text = await client.slash(input);
+        sysMsg(text);
 
-      const parts = input.slice(1).split(/\s+/);
-      const cmd = parts[0]?.toLowerCase();
-      const arg = parts.slice(1).join(" ").trim();
-      const mgr = agent.sessions;
-
-      switch (cmd) {
-        case "new": {
-          const name = arg || `session-${Date.now()}`;
-          const s = mgr.create(name, "user");
-          mgr.setActive(s.id);
-          sysMsg(`✓ Created session "${name}" (${s.id.slice(0, 8)}…)`);
-          return true;
+        // Keep activeSession in sync with daemon's response
+        const parts = input.replace(/^\//, "").split(/\s+/);
+        const cmd = parts[0]?.toLowerCase();
+        const arg = parts.slice(1).join(" ").trim();
+        if (cmd === "switch" && text.startsWith("✓ Switched")) {
+          setActiveSession(arg);
+        } else if (cmd === "new") {
+          const match = text.match(/"([^"]+)"/);
+          if (match) setActiveSession(match[1]);
         }
-        case "sessions":
-        case "list": {
-          const sessions = mgr.list("user");
-          if (!sessions.length) { sysMsg("No user sessions."); return true; }
-          const lines = sessions.map((s) => {
-            const active = s.id === mgr.activeId ? " ← active" : "";
-            return `  ${s.name} [${s.id.slice(0, 8)}…] ${s.messages.length} msgs${active}`;
-          });
-          sysMsg("Sessions:\n" + lines.join("\n"));
-          return true;
-        }
-        case "switch": {
-          if (!arg) { sysMsg("Usage: /switch <name>"); return true; }
-          const target = mgr.getByName(arg);
-          if (!target || target.type !== "user") { sysMsg(`Session not found: "${arg}"`); return true; }
-          mgr.setActive(target.id);
-          sysMsg(`✓ Switched to "${target.name}" — ${target.messages.length} msgs`);
-          return true;
-        }
-        case "current": {
-          const s = mgr.active;
-          sysMsg(`Session: ${s.name}\nID: ${s.id}\nMessages: ${s.messages.length}\nCreated: ${s.createdAt.toISOString()}`);
-          return true;
-        }
-        case "help": {
-          sysMsg(
-            "Commands:\n" +
-            "  /new [name]      Create new session\n" +
-            "  /sessions        List sessions\n" +
-            "  /switch <name>   Switch session\n" +
-            "  /current         Session info\n" +
-            "  /delete <name>   Delete session\n" +
-            "  /help            This help",
-          );
-          return true;
-        }
-        case "delete": {
-          if (!arg) { sysMsg("Usage: /delete <name>"); return true; }
-          const dt = mgr.getByName(arg);
-          if (!dt || dt.type !== "user") { sysMsg(`Session not found: "${arg}"`); return true; }
-          if (dt.id === mgr.activeId) { sysMsg("Cannot delete active session."); return true; }
-          mgr.delete(dt.id);
-          sysMsg(`✓ Deleted "${dt.name}"`);
-          return true;
-        }
-        default:
-          sysMsg(`Unknown command: /${cmd}. Type /help`);
-          return true;
+      } catch (err: any) {
+        sysMsg(`[slash error] ${err.message ?? err}`);
       }
     },
     [sysMsg],
@@ -98,10 +119,17 @@ export function useChat() {
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!agentRef.current || isLoading) return;
+      const client = clientRef.current;
+      if (!client) return;
+      if (isLoading) return;
 
       if (text.startsWith("/")) {
         handleSlash(text);
+        return;
+      }
+
+      if (!client.isConnected()) {
+        sysMsg("Not connected to daemon — cannot send message.");
         return;
       }
 
@@ -109,7 +137,7 @@ export function useChat() {
       setIsLoading(true);
 
       try {
-        await agentRef.current.chatStream(text, {
+        const handle = client.startChat(activeSession, text, {
           onDelta: (accumulated) => {
             setMessages((prev) => {
               const last = prev[prev.length - 1];
@@ -133,17 +161,56 @@ export function useChat() {
             });
           },
         });
+        activeChatRef.current = handle;
+        await handle.promise;
       } catch (e: any) {
+        const message = e.message ?? String(e);
         setMessages((prev) => [
           ...prev,
-          { role: "system", content: `Error: ${e.message ?? e}`, timestamp: new Date() },
+          { role: "system", content: message === "Cancelled" ? "Cancelled." : `Error: ${message}`, timestamp: new Date() },
         ]);
       } finally {
+        activeChatRef.current = null;
         setIsLoading(false);
       }
     },
-    [isLoading, handleSlash],
+    [isLoading, handleSlash, activeSession, sysMsg],
   );
 
-  return { messages, isLoading, sendMessage, agent: agentRef.current };
+  const cancel = useCallback(() => {
+    activeChatRef.current?.cancel();
+  }, []);
+
+  const shutdown = useCallback(() => {
+    clientRef.current?.close();
+  }, []);
+
+  return { messages, isLoading, sendMessage, connected, info, activeSession, cancel, shutdown };
+}
+
+function formatEvent(ev: Extract<ServerMessage, { type: "event" }>): string {
+  switch (ev.kind) {
+    case "trade_entered": {
+      const d = ev.data;
+      return `[AUTO] Entered ${d.side} ${d.symbol} @ ${d.entryPrice} ($${d.sizeUsdt})`;
+    }
+    case "trade_exited": {
+      const d = ev.data;
+      const pnl = d.pnl ?? 0;
+      const sign = pnl >= 0 ? "+" : "";
+      return `[AUTO] Exited ${d.symbol} — PnL: ${sign}$${pnl.toFixed(2)}`;
+    }
+    case "trade_rejected":
+      return `[RiskGate] Rejected ${ev.data.symbol} ${ev.data.action}: ${ev.data.reason}`;
+    case "heartbeat":
+      return `[Heartbeat] ${ev.data.response}`;
+    case "review":
+      return `[Review] ${ev.data.summary}…`;
+    case "feed_error":
+      return `[Feed] ${ev.data.key}: ${ev.data.error}`;
+    case "strategist_report": {
+      const task = ev.data.task ?? "";
+      return `[STRATEGIST] ${task}\n${ev.data.report}`;
+    }
+  }
 }

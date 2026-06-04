@@ -10,7 +10,8 @@ registerTool(
     },
     required: [],
   },
-  async ({ soul, personality = "" }) => {
+  ["soul", "memory"],
+  async ({ soul, memory, personality = "" }) => {
     try {
       if (!personality) {
         const profile = soul.profile;
@@ -37,6 +38,8 @@ registerTool(
 
       const oldName = soul.name;
       soul.switch(personality);
+      // Persist so a restart doesn't silently revert to env default
+      memory?.setDaemonState("active_soul", personality);
       const profile = soul.profile;
       return [
         `Personality switched: ${oldName} \u2192 ${soul.name}`,

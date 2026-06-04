@@ -26,36 +26,43 @@ registerTool(
     },
     required: ["action"],
   },
+  ["strategy_store"],
   async ({ strategy_store, action, rule_id, risk_params }) => {
     try {
       if (!strategy_store) return "Error: strategy engine not initialized";
 
       if (action === "list") {
-        const rules = strategy_store.getAllRules();
-        if (!rules.length) return "No strategy rules configured.";
-        const lines = ["Active Strategy Rules:", "=".repeat(50)];
-        for (const r of rules) {
-          const status = r.enabled ? "ON " : "OFF";
-          lines.push(`[${status}] ${r.id.slice(0, 8)}… | ${r.symbol} ${r.side} | $${r.positionSizeUsdt} | SL:${r.stopLossPct}% TP:${r.takeProfitPct}%`);
-          lines.push(`      Entry: ${r.entry.map((c: any) => `${c.indicator} ${c.operator} ${c.value}`).join(" AND ")}`);
-          lines.push(`      Exit:  ${r.exit.map((c: any) => `${c.indicator} ${c.operator} ${c.value}`).join(" AND ")}`);
+        const strats = strategy_store.getAllStrategies();
+        if (!strats.length) return "No strategies configured.";
+        const lines = ["Active Strategies:", "=".repeat(50)];
+        for (const s of strats) {
+          const status = s.enabled ? "ON " : "OFF";
+          const p = s.params as Record<string, any>;
+          const side = p.side ?? "?";
+          const size = p.positionSizeUsdt ?? 0;
+          const sl = p.stopLossPct ?? 0;
+          const tp = p.takeProfitPct ?? 0;
+          const tf = p.timeframe ?? "?";
+          lines.push(`[${status}] ${s.id.slice(0, 8)}… kind=${s.kind} | ${s.symbol}@${tf} ${side} | $${size} | SL:${sl}% TP:${tp}%`);
+          if (p.entry) lines.push(`      Entry: ${p.entry.map((c: any) => `${c.indicator} ${c.operator} ${c.value}`).join(" AND ")}`);
+          if (p.exit) lines.push(`      Exit:  ${p.exit.map((c: any) => `${c.indicator} ${c.operator} ${c.value}`).join(" AND ")}`);
         }
         return lines.join("\n");
       }
 
       if (action === "enable" || action === "disable") {
         if (!rule_id) return "Error: provide rule_id";
-        const updated = strategy_store.updateRule(rule_id, { enabled: action === "enable" });
+        const updated = strategy_store.updateStrategy(rule_id, { enabled: action === "enable" });
         return updated
-          ? `Rule ${rule_id.slice(0, 8)}… ${action}d.`
-          : `Rule not found: ${rule_id}`;
+          ? `Strategy ${rule_id.slice(0, 8)}… ${action}d.`
+          : `Strategy not found: ${rule_id}`;
       }
 
       if (action === "delete") {
         if (!rule_id) return "Error: provide rule_id";
-        return strategy_store.removeRule(rule_id)
-          ? `Rule ${rule_id.slice(0, 8)}… deleted.`
-          : `Rule not found: ${rule_id}`;
+        return strategy_store.removeStrategy(rule_id)
+          ? `Strategy ${rule_id.slice(0, 8)}… deleted.`
+          : `Strategy not found: ${rule_id}`;
       }
 
       if (action === "risk") {

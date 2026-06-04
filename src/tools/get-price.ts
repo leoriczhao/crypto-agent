@@ -10,6 +10,7 @@ registerTool(
     },
     required: ["symbol"],
   },
+  ["exchange"],
   async ({ exchange, symbol }) => {
     try {
       const data = await exchange.fetchTicker(symbol);

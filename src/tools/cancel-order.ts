@@ -11,6 +11,7 @@ registerTool(
     },
     required: ["order_id", "symbol"],
   },
+  ["exchange"],
   async ({ exchange, order_id, symbol }) => {
     try {
       const result = await exchange.cancelOrder(order_id, symbol);
