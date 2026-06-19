@@ -38,6 +38,8 @@ function makeHandlers(overrides: Partial<IpcServerHandlers> = {}): IpcServerHand
     describe: () => ({
       mode: "PAPER",
       exchange: "gateio",
+      bot: "default-bot",
+      tradingAccount: "default-trading-gateio-paper",
       soul: "balanced",
       heartbeatInterval: 60,
       fastPath: "idle",
@@ -73,6 +75,8 @@ describe("IPC end-to-end", () => {
     expect(welcome.type).toBe("welcome");
     expect(welcome.mode).toBe("PAPER");
     expect(welcome.exchange).toBe("gateio");
+    expect(welcome.bot).toBe("default-bot");
+    expect(welcome.tradingAccount).toBe("default-trading-gateio-paper");
     expect(welcome.soul).toBe("balanced");
   });
 

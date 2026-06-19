@@ -21,20 +21,23 @@ API) is explicitly NOT persisted.
 
 | Table | Purpose | Schema owner |
 |-------|---------|--------------|
-| `sessions` | Conversation session metadata | `session.ts` / `memory.ts` |
+| `funding_accounts` | Capital owner / funding pool identity | `memory.ts` |
+| `trading_accounts` | Executable exchange account identity | `memory.ts` |
+| `trading_bots` | Trading bot identity bound to one trading account | `memory.ts` |
+| `sessions` | Conversation session metadata + bot binding | `session.ts` / `memory.ts` |
 | `conversations` | Chat history per session | `memory.ts` |
-| `trades` | Filled trade audit log | `memory.ts` |
+| `trades` | Filled trade audit log + bot/account attribution | `memory.ts` |
 | `session_summaries` | Compacted context summaries | `memory.ts` |
 | `cron_jobs` | Recurring LLM tasks | `memory.ts` |
 | `events` | Generic event log | `memory.ts` |
 | `strategy_rules` | Legacy rule entries, migrated into `strategies` | `memory.ts` |
 | `risk_params` | StrategyManager risk parameters | `memory.ts` |
-| `active_positions` (A0) | Fast-path positions + SL/TP | `memory.ts` / `executor.ts` |
+| `active_positions` (A0) | Fast-path positions + SL/TP + bot/account attribution | `memory.ts` / `executor.ts` |
 | `daily_pnl` (A1) | Realized PnL per day | `memory.ts` / `risk-gate.ts` |
-| `pending_orders` (A2) | Orders awaiting fill | `memory.ts` / buy & sell tools |
+| `pending_orders` (A2) | Orders awaiting fill + bot/account attribution | `memory.ts` / buy & sell tools |
 | `portfolio_watermark` (A3) | Peak portfolio value for drawdown | `memory.ts` / `risk-gate.ts` |
 | `daemon_state` (B0) | KV for soul / exchange / session pointers | `memory.ts` / daemon & tools |
-| `strategies` (B1) | Polymorphic strategy snapshots (`signal`, `ladder`, `grid`) | `memory.ts` / `strategy/manager.ts` |
+| `strategies` (B1) | Polymorphic strategy snapshots (`signal`, `ladder`, `grid`) + bot/account attribution | `memory.ts` / `strategy/manager.ts` |
 | `strategy_kb` (C0) | Strategist research outcomes and failure reasons | `memory.ts` / KB tools |
 
 ## Restart reconciliation flow
@@ -43,8 +46,11 @@ API) is explicitly NOT persisted.
 2. `CryptoDaemon.constructor()` → `restoreDaemonState()` applies saved
    `active_soul` / `active_exchange` / `active_user_session_id` from the
    `daemon_state` KV.
-3. `StrategyManager.loadFromDb()` restores strategies + risk params.
-4. `startFastPath()` → `OrderExecutor.restore()` loads `active_positions`
+3. `ensureDefaultIdentity()` creates or refreshes the default funding account,
+   trading account, and bot for the active exchange/mode, then backfills legacy
+   rows whose bot/account columns are still NULL.
+4. `StrategyManager.loadFromDb()` restores strategies + risk params.
+5. `startFastPath()` → `OrderExecutor.restore()` loads `active_positions`
    and cross-checks with `exchange.fetchPositions()`:
    - **Match** → restore SL/TP into in-memory map.
    - **Local record, no exchange position** → drop (stale).
@@ -52,12 +58,27 @@ API) is explicitly NOT persisted.
      decides.
    - **Exchange unreachable** → keep local records; retry on the next
      evaluate.
-5. `reconcilePendingOrders()` loads `status='open'` orders and compares
+6. `reconcilePendingOrders()` loads `status='open'` orders and compares
    against `exchange.fetchOpenOrders()`. Missing IDs → mark `filled`.
-6. `HeartbeatScheduler.start()`.
-7. `cronLoop()` begins.
+7. `HeartbeatScheduler.start()`.
+8. `cronLoop()` begins.
 
 ## Implemented (Iteration 11)
+
+### D0 — Account / bot / session identity
+The persistence model now separates:
+
+- `funding_accounts` — capital owner / funding pool
+- `trading_accounts` — executable account scope (`exchange_id` + PAPER/LIVE mode)
+- `trading_bots` — bot bound to a trading account
+- `sessions.bot_id` — conversation context bound to a bot
+
+Trade-bearing tables (`trades`, `pending_orders`, `active_positions`, and
+`strategies`) carry `bot_id` and `trading_account_id` so audit rows are no
+longer implicitly tied to the daemon-global `active_exchange`.
+
+Current runtime scope is intentionally conservative: one daemon-active default
+bot. Multi-bot concurrent execution is not implemented here.
 
 ### A0 — Active positions + SL/TP
 Without this, a daemon restart loses knowledge of where our stops sit. The
@@ -90,6 +111,8 @@ restart:
 - `active_soul` — survives `/switch_soul`
 - `active_exchange` — survives `/switch_exchange`
 - `active_user_session_id` — CLI reconnects to the right session
+- `active_funding_account_id` / `active_trading_account_id` / `active_bot_id`
+  — record the default identity selected for the active exchange
 
 Implemented as a generic `daemon_state (key, value)` table so new
 single-value state can be added without schema migrations.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { CryptoAgent } from "./agent.js";
 import { config } from "./config.js";
-import { Memory } from "./memory.js";
+import { Memory, type DefaultIdentity } from "./memory.js";
 import { HeartbeatScheduler } from "./heartbeat.js";
 import { Notifier } from "./notify.js";
 import { TOOL_HANDLERS } from "./tools/registry.js";
@@ -32,6 +32,7 @@ class CryptoDaemon {
   private heartbeat: HeartbeatScheduler;
   private userSessionId: string;
   private systemSessionId: string;
+  private activeIdentity!: DefaultIdentity;
   private ipc: IpcServer;
 
   // Fast path
@@ -49,11 +50,12 @@ class CryptoDaemon {
     this.memory = new Memory(config.memoryDbPath);
     this.agent.memory = this.memory;
 
-    this.strategyStore = new StrategyManager(this.memory);
-    this.agent.strategyStore = this.strategyStore;
-
     // Restore user-driven soul / exchange choices before any fast-path setup
     this.restoreDaemonState();
+    this.activeIdentity = this.ensureDefaultIdentity();
+
+    this.strategyStore = new StrategyManager(this.memory);
+    this.agent.strategyStore = this.strategyStore;
 
     this.systemSessionId = this.ensureSession("system", "system");
     this.userSessionId = this.ensureSession("user", "user");
@@ -85,6 +87,8 @@ class CryptoDaemon {
       describe: () => ({
         mode: config.paperTrading ? "PAPER" : "LIVE",
         exchange: this.agent.exchangeManager.activeId || config.defaultExchange,
+        bot: this.activeIdentity.bot.id,
+        tradingAccount: this.activeIdentity.tradingAccount.id,
         soul: this.agent.soul.name,
         heartbeatInterval: config.heartbeatInterval,
         fastPath: this.currentFastPathState(),
@@ -111,6 +115,21 @@ class CryptoDaemon {
         this.log(`Could not restore exchange "${savedExchange}": ${e.message ?? e}`);
       }
     }
+  }
+
+  private ensureDefaultIdentity(): DefaultIdentity {
+    const identity = this.memory.ensureDefaultIdentity({
+      exchangeId: this.agent.exchangeManager.activeId || config.defaultExchange,
+      mode: config.paperTrading ? "PAPER" : "LIVE",
+      name: "default",
+    });
+    this.memory.setDaemonState("active_funding_account_id", identity.fundingAccount.id);
+    this.memory.setDaemonState("active_trading_account_id", identity.tradingAccount.id);
+    this.memory.setDaemonState("active_bot_id", identity.bot.id);
+    this.log(
+      `Active identity: bot=${identity.bot.id} trading_account=${identity.tradingAccount.id} funding_account=${identity.fundingAccount.id}`,
+    );
+    return identity;
   }
 
   private initFastPath(): void {
@@ -248,6 +267,7 @@ class CryptoDaemon {
     const existing = this.memory.getSessionByName(name);
     if (existing) {
       const session = this.agent.sessions.create(name, type, existing.id);
+      this.bindSessionToActiveBot(existing.id);
       const messages = this.memory.loadRecentMessages(existing.id, 20);
       if (messages.length) {
         session.messages = messages;
@@ -256,8 +276,14 @@ class CryptoDaemon {
       return existing.id;
     }
     const session = this.agent.sessions.create(name, type);
-    this.memory.createSession(session.id, name, type);
+    this.memory.createSession(session.id, name, type, this.activeIdentity.bot.id);
     return session.id;
+  }
+
+  private bindSessionToActiveBot(sessionId: string): void {
+    if (!this.memory.getSessionBinding(sessionId)) {
+      this.memory.bindSessionToBot(sessionId, this.activeIdentity.bot.id);
+    }
   }
 
   // ─── IPC request handlers ─────────────────────────────────────────────────
@@ -294,7 +320,7 @@ class CryptoDaemon {
       case "new": {
         const name = arg || `session-${Date.now()}`;
         const session = this.agent.sessions.create(name, "user");
-        this.memory.createSession(session.id, name, "user");
+        this.memory.createSession(session.id, name, "user", this.activeIdentity.bot.id);
         this.userSessionId = session.id;
         this.agent.sessions.setActive(session.id);
         this.memory.setDaemonState("active_user_session_id", session.id);
@@ -319,6 +345,7 @@ class CryptoDaemon {
         if (!target || target.type !== "user") return { text: `Session not found: "${arg}"` };
         this.userSessionId = target.id;
         this.agent.sessions.setActive(target.id);
+        this.bindSessionToActiveBot(target.id);
         this.memory.setDaemonState("active_user_session_id", target.id);
         return {
           text: `✓ Switched to "${target.name}" (${target.id.slice(0, 8)}…) — ${target.messages.length} msgs`,
@@ -328,10 +355,13 @@ class CryptoDaemon {
 
       case "current": {
         const s = this.agent.sessions.get(this.userSessionId);
+        const binding = this.memory.getSessionBinding(this.userSessionId);
         return {
           text: [
             `Session: ${s.name}`,
             `ID:       ${s.id}`,
+            `Bot:      ${binding?.botId ?? "(unbound)"}`,
+            `Account:  ${binding?.tradingAccountId ?? "(unbound)"}`,
             `Messages: ${s.messages.length}`,
             `Created:  ${s.createdAt.toISOString()}`,
             `Active:   ${s.lastActiveAt.toISOString()}`,

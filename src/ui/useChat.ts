@@ -11,6 +11,8 @@ export interface ChatMessage {
 export interface DaemonInfo {
   mode: "PAPER" | "LIVE";
   exchange: string;
+  bot: string;
+  tradingAccount: string;
   soul: string;
   daemonPid: number;
   heartbeatInterval: number;
@@ -55,6 +57,8 @@ export function useChat(): UseChatReturn {
       setInfo({
         mode: w.mode,
         exchange: w.exchange,
+        bot: w.bot,
+        tradingAccount: w.tradingAccount,
         soul: w.soul,
         daemonPid: w.daemonPid,
         heartbeatInterval: w.heartbeatInterval,

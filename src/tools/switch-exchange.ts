@@ -10,8 +10,8 @@ registerTool(
     },
     required: [],
   },
-  ["exchange_manager", "memory"],
-  async ({ exchange_manager, memory, exchange_id = "" }) => {
+  ["exchange_manager", "memory", "config"],
+  async ({ exchange_manager, memory, config, exchange_id = "" }) => {
     try {
       const exchanges = exchange_manager.list();
       const active = exchange_manager.activeId;
@@ -37,6 +37,16 @@ registerTool(
 
       exchange_manager.setActive(exchange_id);
       memory?.setDaemonState("active_exchange", exchange_id);
+      const identity = memory?.ensureDefaultIdentity?.({
+        exchangeId: exchange_id,
+        mode: config?.paperTrading ? "PAPER" : "LIVE",
+        name: "default",
+      });
+      if (identity) {
+        memory?.setDaemonState("active_funding_account_id", identity.fundingAccount.id);
+        memory?.setDaemonState("active_trading_account_id", identity.tradingAccount.id);
+        memory?.setDaemonState("active_bot_id", identity.bot.id);
+      }
       return `Switched active exchange to: ${exchange_id}`;
     } catch (e: any) {
       return `Error: ${e.message ?? e}`;

@@ -101,6 +101,8 @@ export interface StrategySnapshot {
   params: Record<string, any>;
   enabled: boolean;
   allocatedUsdt: number;
+  botId?: string | null;
+  tradingAccountId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

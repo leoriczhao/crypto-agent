@@ -25,6 +25,8 @@ export type ServerMessage =
       protocolVersion: number;
       mode: "PAPER" | "LIVE";
       exchange: string;
+      bot: string;
+      tradingAccount: string;
       soul: string;
       heartbeatInterval: number;
       fastPath: "running" | "idle" | "off";

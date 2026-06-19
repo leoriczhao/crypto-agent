@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@langchain/langgraph": "^1.4.4",
     "better-sqlite3": "^11.0.0",
     "ccxt": "^4.5.0",
     "chalk": "^5.4.0",
@@ -34,8 +35,8 @@
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
-    "tsx": "^4.19.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.9"
   }
 }

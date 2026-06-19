@@ -130,4 +130,118 @@ describe("Memory", () => {
     mem.createSession("s1", "user", "user");
     expect(() => mem.createSession("s1", "user", "user")).not.toThrow();
   });
+
+  test("identity default seed creates funding account, trading account, and bot", () => {
+    mem = new Memory(makeTempDb());
+
+    const identity = mem.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+
+    expect(identity.fundingAccount.id).toBe("default-funding");
+    expect(identity.tradingAccount.id).toBe("default-trading-okx-paper");
+    expect(identity.tradingAccount.fundingAccountId).toBe(identity.fundingAccount.id);
+    expect(identity.tradingAccount.exchangeId).toBe("okx");
+    expect(identity.tradingAccount.mode).toBe("PAPER");
+    expect(identity.bot.id).toBe("default-bot");
+    expect(identity.bot.tradingAccountId).toBe(identity.tradingAccount.id);
+    expect(identity.bot.status).toBe("active");
+
+    const bots = mem.listTradingBots();
+    expect(bots).toHaveLength(1);
+    expect(mem.getDefaultBot()!.id).toBe("default-bot");
+  });
+
+  test("identity session binding is explicit and idempotent", () => {
+    mem = new Memory(makeTempDb());
+    const identity = mem.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    mem.createSession("s1", "user", "user");
+
+    expect(mem.getSessionBinding("s1")).toBeNull();
+    mem.bindSessionToBot("s1", identity.bot.id);
+    mem.bindSessionToBot("s1", identity.bot.id);
+
+    const binding = mem.getSessionBinding("s1");
+    expect(binding).toMatchObject({
+      sessionId: "s1",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      fundingAccountId: identity.fundingAccount.id,
+    });
+  });
+
+  test("identity fields can be stored on trade journal rows", () => {
+    mem = new Memory(makeTempDb());
+    const identity = mem.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    mem.createSession("s1", "user", "user");
+
+    mem.logTrade("s1", {
+      symbol: "BTC/USDT",
+      side: "buy",
+      amount: 0.5,
+      price: 65000,
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+    });
+
+    const trades = mem.getRecentTrades(1);
+    expect(trades[0].botId).toBe(identity.bot.id);
+    expect(trades[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
+
+  test("identity defaults are applied to trade rows when caller omits them", () => {
+    mem = new Memory(makeTempDb());
+    const identity = mem.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    mem.createSession("s1", "user", "user");
+
+    mem.logTrade("s1", {
+      symbol: "ETH/USDT",
+      side: "sell",
+      amount: 2,
+      price: 3500,
+    });
+
+    const trades = mem.getRecentTrades(1);
+    expect(trades[0].botId).toBe(identity.bot.id);
+    expect(trades[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
+
+  test("identity seed backfills legacy sessions and trades without identity", () => {
+    mem = new Memory(makeTempDb());
+    mem.createSession("s1", "user", "user");
+    mem.logTrade("s1", {
+      symbol: "BTC/USDT",
+      side: "buy",
+      amount: 0.5,
+      price: 65000,
+    });
+
+    const identity = mem.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+
+    expect(mem.getSessionBinding("s1")).toMatchObject({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+    });
+    const trades = mem.getRecentTrades(1);
+    expect(trades[0].botId).toBe(identity.bot.id);
+    expect(trades[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
 });

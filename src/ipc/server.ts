@@ -44,6 +44,8 @@ export interface IpcServerHandlers {
   describe(): {
     mode: "PAPER" | "LIVE";
     exchange: string;
+    bot: string;
+    tradingAccount: string;
     soul: string;
     heartbeatInterval: number;
     fastPath: "running" | "idle" | "off";
@@ -181,6 +183,8 @@ export class IpcServer extends EventEmitter {
           protocolVersion: PROTOCOL_VERSION,
           mode: d.mode,
           exchange: d.exchange,
+          bot: d.bot,
+          tradingAccount: d.tradingAccount,
           soul: d.soul,
           heartbeatInterval: d.heartbeatInterval,
           fastPath: d.fastPath,

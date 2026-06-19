@@ -75,6 +75,56 @@ describe("A0 — active_positions", () => {
     const loaded = memory.loadActivePositions();
     expect(loaded.map((p) => p.ruleId)).toEqual(["a", "b"]);
   });
+
+  test("stores bot and trading account identity", () => {
+    const identity = memory.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    memory.saveActivePosition({
+      ruleId: "r",
+      strategyId: "strategy-1",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      symbol: "BTC/USDT",
+      side: "long",
+      entryPrice: 50000,
+      amount: 0.01,
+      stopLoss: 48000,
+      takeProfit: 52000,
+      enteredAt: 1,
+      source: "fast_path",
+    });
+
+    const loaded = memory.loadActivePositions();
+    expect(loaded[0].botId).toBe(identity.bot.id);
+    expect(loaded[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
+
+  test("uses default identity when caller omits bot and trading account", () => {
+    const identity = memory.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    memory.saveActivePosition({
+      ruleId: "r",
+      strategyId: "strategy-1",
+      symbol: "BTC/USDT",
+      side: "long",
+      entryPrice: 50000,
+      amount: 0.01,
+      stopLoss: 48000,
+      takeProfit: 52000,
+      enteredAt: 1,
+      source: "fast_path",
+    });
+
+    const loaded = memory.loadActivePositions();
+    expect(loaded[0].botId).toBe(identity.bot.id);
+    expect(loaded[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
 });
 
 describe("A1 — daily_pnl", () => {
@@ -140,6 +190,121 @@ describe("A2 — pending_orders", () => {
     const open = memory.loadOpenPendingOrders();
     expect(open).toHaveLength(1);
     expect(open[0].id).toBe(id2);
+  });
+
+  test("stores bot and trading account identity", () => {
+    const identity = memory.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    memory.createPendingOrder({
+      sessionId: "s1",
+      strategyId: "strategy-1",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      symbol: "BTC/USDT",
+      side: "buy",
+      orderType: "limit",
+      price: 49000,
+      amount: 0.01,
+    });
+
+    const open = memory.loadOpenPendingOrders();
+    expect(open[0].botId).toBe(identity.bot.id);
+    expect(open[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
+
+  test("uses default identity when caller omits bot and trading account", () => {
+    const identity = memory.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    memory.createPendingOrder({
+      sessionId: "s1",
+      strategyId: "strategy-1",
+      symbol: "BTC/USDT",
+      side: "buy",
+      orderType: "limit",
+      price: 49000,
+      amount: 0.01,
+    });
+
+    const open = memory.loadOpenPendingOrders();
+    expect(open[0].botId).toBe(identity.bot.id);
+    expect(open[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
+});
+
+describe("B1 — strategy identity", () => {
+  test("uses default identity when saving strategy snapshots", () => {
+    const identity = memory.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+    memory.saveStrategy({
+      id: "strategy-1",
+      kind: "signal",
+      symbol: "BTC/USDT",
+      params: { timeframe: "1h" },
+      allocatedUsdt: 100,
+      enabled: true,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      updatedAt: "2026-06-18T00:00:00.000Z",
+    });
+
+    const loaded = memory.loadAllStrategies();
+    expect(loaded[0].botId).toBe(identity.bot.id);
+    expect(loaded[0].tradingAccountId).toBe(identity.tradingAccount.id);
+  });
+
+  test("identity seed backfills legacy strategy, position, and pending order rows", () => {
+    memory.saveStrategy({
+      id: "strategy-1",
+      kind: "signal",
+      symbol: "BTC/USDT",
+      params: { timeframe: "1h" },
+      allocatedUsdt: 100,
+      enabled: true,
+      createdAt: "2026-06-18T00:00:00.000Z",
+      updatedAt: "2026-06-18T00:00:00.000Z",
+    });
+    memory.saveActivePosition({
+      ruleId: "r",
+      strategyId: "strategy-1",
+      symbol: "BTC/USDT",
+      side: "long",
+      entryPrice: 50000,
+      amount: 0.01,
+      stopLoss: 48000,
+      takeProfit: 52000,
+      enteredAt: 1,
+      source: "fast_path",
+    });
+    memory.createPendingOrder({
+      sessionId: "s1",
+      strategyId: "strategy-1",
+      symbol: "BTC/USDT",
+      side: "buy",
+      orderType: "limit",
+      price: 49000,
+      amount: 0.01,
+    });
+
+    const identity = memory.ensureDefaultIdentity({
+      exchangeId: "okx",
+      mode: "PAPER",
+      name: "default",
+    });
+
+    expect(memory.loadAllStrategies()[0].botId).toBe(identity.bot.id);
+    expect(memory.loadAllStrategies()[0].tradingAccountId).toBe(identity.tradingAccount.id);
+    expect(memory.loadActivePositions()[0].botId).toBe(identity.bot.id);
+    expect(memory.loadActivePositions()[0].tradingAccountId).toBe(identity.tradingAccount.id);
+    expect(memory.loadOpenPendingOrders()[0].botId).toBe(identity.bot.id);
+    expect(memory.loadOpenPendingOrders()[0].tradingAccountId).toBe(identity.tradingAccount.id);
   });
 });
 

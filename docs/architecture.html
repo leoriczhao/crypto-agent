@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto Agent 架构说明</title>
+  <style>
+    :root {
+      --paper: #f7f3ec;
+      --surface: #fffdf8;
+      --surface-2: #fbfaf6;
+      --ink: #25211c;
+      --muted: #766d62;
+      --line: #dfd4c5;
+      --accent: #c76745;
+      --accent-2: #2f6c68;
+      --accent-3: #7357a3;
+      --green: #3f7b4c;
+      --red: #a94d3a;
+      --shadow: 0 18px 45px rgba(49, 42, 34, 0.08);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --serif: Georgia, "Times New Roman", serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.55;
+    }
+
+    a { color: inherit; }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 24px 56px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 12px 0 28px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-weight: 680;
+    }
+
+    .mark {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background:
+        linear-gradient(135deg, var(--accent), #df956f 52%, var(--accent-2) 53%);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+      gap: 28px;
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 30px;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 520;
+      font-size: clamp(42px, 7vw, 82px);
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      margin: 22px 0 0;
+      color: #4d463f;
+      font-size: 18px;
+    }
+
+    .note {
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.82);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .note strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 28px 0 18px;
+    }
+
+    .kpi {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .kpi .value {
+      font-family: var(--serif);
+      font-size: 30px;
+      color: var(--ink);
+      line-height: 1;
+    }
+
+    .kpi .label {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    section {
+      padding: 38px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.35fr) minmax(0, 0.65fr);
+      gap: 28px;
+      margin-bottom: 22px;
+    }
+
+    h2 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 520;
+      font-size: 34px;
+      letter-spacing: 0;
+      line-height: 1.08;
+    }
+
+    .section-copy {
+      margin: 0;
+      color: #514a42;
+      font-size: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .two {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      background: #f2ece3;
+      border: 1px solid #e2d7c9;
+      border-radius: 5px;
+      padding: 1px 5px;
+      color: #3d362e;
+    }
+
+    pre {
+      margin: 0;
+      overflow: auto;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #d8ccb9;
+      background: #201d19;
+      color: #f8efe0;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
+      box-shadow: var(--shadow);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      min-width: 860px;
+      height: auto;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .tab {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 13px;
+      font: 650 13px var(--sans);
+      cursor: pointer;
+    }
+
+    .tab[aria-selected="true"] {
+      background: var(--ink);
+      color: var(--surface);
+      border-color: var(--ink);
+    }
+
+    .flow-panel { display: none; }
+    .flow-panel.active { display: block; }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      counter-reset: step;
+    }
+
+    .step {
+      position: relative;
+      min-height: 152px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 42px 14px 14px;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      top: 13px;
+      left: 14px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--accent);
+      color: white;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .step h4 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      display: table;
+    }
+
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: #efe8dc;
+      color: #514638;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .matrix .card {
+      min-height: 160px;
+    }
+
+    .source-list {
+      columns: 2;
+      column-gap: 28px;
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .source-list li {
+      break-inside: avoid;
+      margin: 0 0 6px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(255, 253, 248, 0.78);
+      border-radius: 0 8px 8px 0;
+      padding: 14px 16px;
+      color: #4f463c;
+    }
+
+    .callout.green { border-left-color: var(--green); }
+    .callout.purple { border-left-color: var(--accent-3); }
+    .callout.red { border-left-color: var(--red); }
+
+    .footer {
+      padding-top: 28px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .copy-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .copy-btn {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 7px;
+      padding: 8px 12px;
+      font: 650 13px var(--sans);
+      cursor: pointer;
+    }
+
+    .copy-btn:hover,
+    .tab:hover {
+      border-color: #bba98e;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      .page { padding: 18px 14px 42px; }
+      .hero, .section-head, .two { grid-template-columns: 1fr; }
+      .kpis, .grid, .matrix, .steps { grid-template-columns: 1fr; }
+      .source-list { columns: 1; }
+      h1 { font-size: 46px; }
+      svg { min-width: 760px; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="topbar">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>Crypto Agent 架构说明</span></div>
+      <div>基于本地源码生成于 2026-06-18</div>
+    </div>
+
+    <header class="hero">
+      <div>
+        <h1>一个长驻 daemon 驱动的加密交易 Agent</h1>
+        <p class="subtitle">
+          这个项目不是一个简单的命令行聊天机器人。当前实现是两进程架构：
+          daemon 持有状态、策略、交易执行和 SQLite，CLI 只是通过 Unix socket 连接的薄客户端。
+        </p>
+      </div>
+      <aside class="note">
+        <strong>先纠正一个容易误读的点</strong>
+        <p>
+          <code>README.md</code> 还保留了早期 “CLI -> Agent Loop -> LLM” 的图。
+          当前代码的实际边界是 <code>CLI -> IPC -> daemon -> Agent/Strategy/Exchange</code>。
+          本页按代码实现解释，不按旧 README 图解释。
+        </p>
+      </aside>
+    </header>
+
+    <div class="kpis" aria-label="项目事实">
+      <div class="kpi"><div class="value">2</div><div class="label">运行进程：daemon + CLI</div></div>
+      <div class="kpi"><div class="value">24</div><div class="label">当前构建注册的 LLM 工具</div></div>
+      <div class="kpi"><div class="value">75</div><div class="label"><code>src/</code> 下的 TypeScript 源文件</div></div>
+      <div class="kpi"><div class="value">30</div><div class="label"><code>test/</code> 下的 Vitest 测试文件</div></div>
+    </div>
+
+    <section id="mental-model">
+      <div class="section-head">
+        <h2>心智模型</h2>
+        <p class="section-copy">
+          可以把 daemon 理解成交易控制平面。它持有账户相关状态、风险闸门、策略运行时、
+          心跳、cron 循环和持久化。客户端可以随时连接或断开，但不拥有交易状态。
+        </p>
+      </div>
+
+      <div class="grid">
+        <article class="card">
+          <h3>状态在 daemon 里</h3>
+          <p>
+            <code>CryptoDaemon</code> 创建 <code>CryptoAgent</code>、<code>Memory</code>、
+            <code>StrategyManager</code>, <code>StrategyRuntime</code>, <code>RiskGate</code>,
+            和 <code>OrderExecutor</code>。入口见 <code>src/daemon.ts:47</code>。
+          </p>
+          <div class="tags"><span class="tag">src/daemon.ts:21</span><span class="tag">src/daemon.ts:47</span></div>
+        </article>
+        <article class="card">
+          <h3>IPC 是 JSONL 协议</h3>
+          <p>
+            CLI 发送 <code>hello</code>、<code>chat</code>、<code>slash</code>、<code>sessions</code>、
+            <code>status</code>、<code>cancel</code> 和 <code>ping</code>。服务端流式返回增量内容，并广播事件。
+          </p>
+          <div class="tags"><span class="tag">src/ipc/protocol.ts:10</span><span class="tag">src/ipc/server.ts:65</span></div>
+        </article>
+        <article class="card">
+          <h3>两条执行路径</h3>
+          <p>
+            慢路径：LLM 循环加工具调用。快路径：市场数据触发策略信号，绕开 LLM 延迟。
+            两条路径最终都会落到共享的交易所抽象和风险控制原语上。
+          </p>
+          <div class="tags"><span class="tag">src/agent.ts:152</span><span class="tag">src/daemon.ts:116</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="diagram">
+      <div class="section-head">
+        <h2>系统地图</h2>
+        <p class="section-copy">
+          关键边界不是“LLM vs tools”，而是“有状态 daemon vs 可替换客户端”。
+          所有可能影响资金的能力都放在 daemon 进程后面。
+        </p>
+      </div>
+
+      <div class="diagram">
+        <svg viewBox="0 0 1120 610" role="img" aria-label="Crypto Agent 架构图">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#776a5d"></path>
+            </marker>
+            <style>
+              .box{fill:#fffdf8;stroke:#d8ccb9;stroke-width:1.4}
+              .daemon{fill:#fbf6ed;stroke:#c76745;stroke-width:2}
+              .fast{fill:#f1f8f6;stroke:#2f6c68;stroke-width:1.6}
+              .risk{fill:#faf0ef;stroke:#a94d3a;stroke-width:1.6}
+              .persist{fill:#f4f0fb;stroke:#7357a3;stroke-width:1.6}
+              .label{font:700 16px system-ui, sans-serif;fill:#25211c}
+              .sub{font:13px system-ui, sans-serif;fill:#766d62}
+              .path{stroke:#776a5d;stroke-width:1.6;fill:none;marker-end:url(#arrow)}
+              .path2{stroke:#2f6c68;stroke-width:1.8;fill:none;marker-end:url(#arrow)}
+              .path3{stroke:#a94d3a;stroke-width:1.8;fill:none;marker-end:url(#arrow)}
+            </style>
+          </defs>
+
+          <rect x="20" y="64" width="155" height="82" rx="8" class="box"></rect>
+          <text x="42" y="96" class="label">Ink CLI</text>
+          <text x="42" y="120" class="sub">薄客户端</text>
+
+          <rect x="20" y="180" width="155" height="82" rx="8" class="box"></rect>
+          <text x="42" y="212" class="label">其他 CLI</text>
+          <text x="42" y="236" class="sub">可多客户端连接</text>
+
+          <rect x="230" y="105" width="165" height="112" rx="8" class="box"></rect>
+          <text x="257" y="145" class="label">Unix Socket</text>
+          <text x="257" y="170" class="sub">JSONL IPC</text>
+          <text x="257" y="193" class="sub">chat / slash / status</text>
+
+          <rect x="455" y="35" width="360" height="520" rx="12" class="daemon"></rect>
+          <text x="485" y="75" class="label">CryptoDaemon</text>
+          <text x="485" y="100" class="sub">唯一有状态控制平面</text>
+
+          <rect x="490" y="128" width="290" height="80" rx="8" class="box"></rect>
+          <text x="515" y="158" class="label">CryptoAgent</text>
+          <text x="515" y="182" class="sub">prompt、会话、LLM 流、工具派发</text>
+
+          <rect x="490" y="236" width="290" height="92" rx="8" class="fast"></rect>
+          <text x="515" y="266" class="label">策略运行时</text>
+          <text x="515" y="290" class="sub">MarketFeed -> Strategy -> Signal</text>
+          <text x="515" y="313" class="sub">信号 / 阶梯 / 网格</text>
+
+          <rect x="490" y="354" width="290" height="84" rx="8" class="risk"></rect>
+          <text x="515" y="384" class="label">风险 + 下单临界区</text>
+          <text x="515" y="408" class="sub">TradeGuard, RiskGate, tradeLock</text>
+
+          <rect x="490" y="462" width="290" height="64" rx="8" class="persist"></rect>
+          <text x="515" y="492" class="label">Memory</text>
+          <text x="515" y="515" class="sub">SQLite WAL 持久化</text>
+
+          <rect x="875" y="90" width="205" height="88" rx="8" class="box"></rect>
+          <text x="910" y="124" class="label">LLM 提供方</text>
+          <text x="910" y="149" class="sub">OpenAI / Anthropic</text>
+
+          <rect x="875" y="230" width="205" height="96" rx="8" class="box"></rect>
+          <text x="910" y="264" class="label">工具注册表</text>
+          <text x="910" y="289" class="sub">24 个工具 + 依赖注入</text>
+
+          <rect x="875" y="372" width="205" height="96" rx="8" class="box"></rect>
+          <text x="910" y="406" class="label">交易所层</text>
+          <text x="910" y="431" class="sub">PaperExchange / LiveExchange</text>
+
+          <rect x="875" y="500" width="205" height="64" rx="8" class="box"></rect>
+          <text x="910" y="532" class="label">CCXT 交易所</text>
+          <text x="910" y="554" class="sub">OKX, Binance, Gate, ...</text>
+
+          <path class="path" d="M175 105 C200 105 205 146 230 146"></path>
+          <path class="path" d="M175 220 C210 220 210 178 230 178"></path>
+          <path class="path" d="M395 162 C430 162 430 168 490 168"></path>
+          <path class="path" d="M780 168 C825 168 825 134 875 134"></path>
+          <path class="path" d="M780 168 C840 168 830 278 875 278"></path>
+          <path class="path2" d="M780 282 C835 282 833 420 875 420"></path>
+          <path class="path3" d="M635 328 L635 354"></path>
+          <path class="path3" d="M780 396 C825 396 825 420 875 420"></path>
+          <path class="path" d="M978 468 L978 500"></path>
+          <path class="path" d="M635 438 L635 462"></path>
+          <path class="path2" d="M490 282 C435 282 435 396 490 396"></path>
+        </svg>
+      </div>
+    </section>
+
+    <section id="flows">
+      <div class="section-head">
+        <h2>运行流程</h2>
+        <p class="section-copy">
+          使用标签切换几条主流程：聊天请求、自主执行、重启恢复，以及风险/下单串行化。
+        </p>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="运行流程">
+        <button class="tab" role="tab" aria-selected="true" data-flow="chat">聊天请求</button>
+        <button class="tab" role="tab" aria-selected="false" data-flow="strategy">策略快路径</button>
+        <button class="tab" role="tab" aria-selected="false" data-flow="startup">daemon 启动</button>
+        <button class="tab" role="tab" aria-selected="false" data-flow="risk">风险与下单锁</button>
+      </div>
+
+      <div class="flow-panel active" id="flow-chat">
+        <div class="steps">
+          <div class="step"><h4>客户端发送聊天</h4><p><code>IpcClient.startChat()</code> 写入 JSONL <code>chat</code> 消息，包含 session、requestId 和内容。</p></div>
+          <div class="step"><h4>daemon 持久化用户回合</h4><p><code>handleChat()</code> 解析会话，先保存用户消息，再调用 agent。</p></div>
+          <div class="step"><h4>Agent 流式运行 LLM 循环</h4><p><code>chatInSession()</code> 做上下文压缩、注入世界快照，然后流式输出 OpenAI 或 Anthropic 响应。</p></div>
+          <div class="step"><h4>工具按依赖执行</h4><p>工具 handler 只拿到声明过的依赖：exchange、memory、config、soul、strategy store 等。</p></div>
+        </div>
+        <div class="tags"><span class="tag">src/ipc/client.ts:92</span><span class="tag">src/daemon.ts:265</span><span class="tag">src/agent.ts:152</span><span class="tag">src/tools/registry.ts:24</span></div>
+      </div>
+
+      <div class="flow-panel" id="flow-strategy">
+        <div class="steps">
+          <div class="step"><h4>LLM 创建策略规则</h4><p><code>plan_strategy</code>、<code>plan_ladder_strategy</code> 或 <code>plan_grid_strategy</code> 写入带类型的策略快照。</p></div>
+          <div class="step"><h4>daemon 实时启动策略</h4><p><code>strategyAdded</code> 启动单个策略，并让 executor 监听该 symbol，无需重启。</p></div>
+          <div class="step"><h4>行情驱动策略</h4><p><code>MarketFeed</code> 监听 ticker、OHLCV 或 order book；能用 WebSocket 就用，否则轮询。</p></div>
+          <div class="step"><h4>信号变成订单</h4><p><code>OrderExecutor.handleSignal()</code> 进入共享交易锁，评估风险，然后下单或拒绝。</p></div>
+        </div>
+        <div class="tags"><span class="tag">src/strategy/manager.ts:114</span><span class="tag">src/daemon.ts:225</span><span class="tag">src/market-feed.ts:133</span><span class="tag">src/strategy/executor.ts:143</span></div>
+      </div>
+
+      <div class="flow-panel" id="flow-startup">
+        <div class="steps">
+          <div class="step"><h4>systemd 启动 dist</h4><p>用户级服务在项目目录运行 <code>node dist/daemon.js</code>，并读取 <code>.env</code>。</p></div>
+          <div class="step"><h4>加锁并恢复状态</h4><p><code>acquireDaemonLock()</code> 防止重复启动；随后 daemon 恢复 soul、exchange、sessions 和策略状态。</p></div>
+          <div class="step"><h4>对账交易状态</h4><p>启动时恢复 active positions，并把 pending orders 与交易所 open orders 对账。</p></div>
+          <div class="step"><h4>心跳、cron、快路径</h4><p>心跳和 cron 循环启动；快路径要么监听活跃策略，要么报告 idle。</p></div>
+        </div>
+        <div class="tags"><span class="tag">systemd/crypto-agent.service.template:7</span><span class="tag">src/daemon.ts:795</span><span class="tag">src/daemon.ts:618</span><span class="tag">src/daemon.ts:752</span></div>
+      </div>
+
+      <div class="flow-panel" id="flow-risk">
+        <div class="steps">
+          <div class="step"><h4>一个全局互斥锁</h4><p>慢路径 buy/sell 工具和快路径 executor 在 daemon 进程内共享 <code>tradeLock</code>。</p></div>
+          <div class="step"><h4>共享的风险判断</h4><p><code>checkTradeAllowed()</code> 是订单大小、回撤、敞口、日亏损、预算和余额检查的单一权威。</p></div>
+          <div class="step"><h4>快路径 RiskGate</h4><p>自动化信号使用 <code>RiskGate</code>，它委托同一个 trade guard，并更新 portfolio watermark。</p></div>
+          <div class="step"><h4>下单与流水</h4><p>成交订单会更新持仓、交易记录、daily PnL、pending orders，并广播 IPC 事件。</p></div>
+        </div>
+        <div class="tags"><span class="tag">src/trade-lock.ts:1</span><span class="tag">src/trade-guard.ts:27</span><span class="tag">src/strategy/risk-gate.ts:13</span><span class="tag">src/memory.ts:410</span></div>
+      </div>
+    </section>
+
+    <section id="modules">
+      <div class="section-head">
+        <h2>核心模块</h2>
+        <p class="section-copy">
+          如果要改行为，优先看这些文件。行号引用指向本页说明所依据的源码位置。
+        </p>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>边界</th>
+            <th>主要文件</th>
+            <th>职责</th>
+            <th>依据</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Daemon 控制平面</td>
+            <td><code>src/daemon.ts</code></td>
+            <td>创建有状态服务，暴露 IPC handler，启动 heartbeat/cron/fast path，负责恢复和干净关闭。</td>
+            <td><code>src/daemon.ts:21</code>, <code>:47</code>, <code>:752</code></td>
+          </tr>
+          <tr>
+            <td>IPC 层</td>
+            <td><code>src/ipc/protocol.ts</code>, <code>server.ts</code>, <code>client.ts</code></td>
+            <td>Unix socket 上的按行 JSON 协议，负责请求关联、取消、状态快照和事件广播。</td>
+            <td><code>src/ipc/protocol.ts:10</code>, <code>server.ts:174</code>, <code>client.ts:92</code></td>
+          </tr>
+          <tr>
+            <td>LLM agent 循环</td>
+            <td><code>src/agent.ts</code>, <code>src/llm/provider.ts</code></td>
+            <td>构建 prompt，选择 OpenAI 或 Anthropic，流式响应，并用依赖注入派发工具调用。</td>
+            <td><code>src/agent.ts:85</code>, <code>:111</code>, <code>:152</code></td>
+          </tr>
+          <tr>
+            <td>工具</td>
+            <td><code>src/tools/*</code>, <code>src/tools/registry.ts</code></td>
+            <td>24 个已注册动作：行情、交易、策略规划、会话控制、KB、压缩和委派。</td>
+            <td><code>src/tools/index.ts:1</code>, <code>registry.ts:24</code></td>
+          </tr>
+          <tr>
+            <td>交易所抽象</td>
+            <td><code>src/exchange/base.ts</code>, <code>paper.ts</code>, <code>live.ts</code></td>
+            <td>共享交易所接口。Paper 模式使用真实行情但模拟成交；Live 模式包装 CCXT。</td>
+            <td><code>base.ts:1</code>, <code>paper.ts:18</code>, <code>live.ts:4</code></td>
+          </tr>
+          <tr>
+            <td>自主策略引擎</td>
+            <td><code>src/strategy/manager.ts</code>, <code>runtime.ts</code>, <code>executor.ts</code></td>
+            <td>持久化策略快照，启动 live 策略实例，把信号转成订单和持仓生命周期事件。</td>
+            <td><code>manager.ts:76</code>, <code>runtime.ts:10</code>, <code>executor.ts:143</code></td>
+          </tr>
+          <tr>
+            <td>风险与安全</td>
+            <td><code>src/trade-lock.ts</code>, <code>src/trade-guard.ts</code>, <code>src/strategy/risk-gate.ts</code></td>
+            <td>串行化风险检查和下单，执行组合、日亏损、预算、敞口和余额约束。</td>
+            <td><code>trade-lock.ts:1</code>, <code>trade-guard.ts:27</code>, <code>risk-gate.ts:13</code></td>
+          </tr>
+          <tr>
+            <td>持久化</td>
+            <td><code>src/memory.ts</code>, <code>docs/persistence.md</code></td>
+            <td>SQLite WAL 表保存会话、交易、策略、活跃持仓、挂单、daily PnL、daemon 状态和研究 KB。</td>
+            <td><code>memory.ts:75</code>, <code>docs/persistence.md:20</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="tools">
+      <div class="section-head">
+        <h2>工具面</h2>
+        <p class="section-copy">
+          工具声明自己需要的依赖，而不是让 agent 为每个工具写分支。这是主要扩展点。
+        </p>
+      </div>
+
+      <div class="matrix">
+        <article class="card">
+          <h3>行情与分析</h3>
+          <p><code>get_price</code>, <code>get_klines</code>, <code>analyze</code>, <code>backtest</code>, <code>get_news</code>, <code>get_chain_stats</code></p>
+        </article>
+        <article class="card">
+          <h3>交易与组合</h3>
+          <p><code>buy</code>, <code>sell</code>, <code>cancel_order</code>, <code>get_portfolio</code>, <code>assess_risk</code></p>
+        </article>
+        <article class="card">
+          <h3>策略控制</h3>
+          <p><code>plan_strategy</code>, <code>plan_ladder_strategy</code>, <code>plan_grid_strategy</code>, <code>manage_rules</code></p>
+        </article>
+        <article class="card">
+          <h3>Agent 操作</h3>
+          <p><code>delegate</code>, <code>load_skill</code>, <code>compact</code>, <code>switch_exchange</code>, <code>switch_soul</code>, <code>schedule</code>, <code>session</code>, <code>kb_log</code>, <code>kb_search</code></p>
+        </article>
+      </div>
+    </section>
+
+    <section id="persistence">
+      <div class="section-head">
+        <h2>持久化状态</h2>
+        <p class="section-copy">
+          持久化设计遵循一条实用规则：只有当丢失状态会造成资金损失、审计缺口、
+          风险控制绕过或严重用户体验退化时，才应该持久化。
+        </p>
+      </div>
+
+      <div class="two">
+        <div class="callout green">
+          <strong>崩溃恢复状态</strong><br>
+          <code>active_positions</code> 保存本地 SL/TP 元数据。<code>pending_orders</code> 跟踪等待成交的订单。
+          <code>daily_pnl</code> 和 <code>portfolio_watermark</code> 避免风险限制在重启后被重置。
+        </div>
+        <div class="callout purple">
+          <strong>Agent 记忆状态</strong><br>
+          <code>sessions</code>, <code>conversations</code>, <code>session_summaries</code>, <code>daemon_state</code>,
+          <code>strategies</code> 和 <code>strategy_kb</code> 保存用户上下文和策略研究结果。
+        </div>
+      </div>
+    </section>
+
+    <section id="operations">
+      <div class="section-head">
+        <h2>运维流程</h2>
+        <p class="section-copy">
+          常规流程是先构建，再运行 daemon，然后连接 CLI。生产使用时，用户级 systemd 服务运行构建后的 daemon。
+        </p>
+      </div>
+
+      <div class="two">
+        <div>
+          <div class="copy-row">
+            <strong>本地命令</strong>
+            <button class="copy-btn" data-copy="commands">复制</button>
+          </div>
+          <pre id="commands">npm run build
+	npm run daemon     # 前台运行 daemon
+	npm run dev        # 连接 CLI 客户端
+	npm test           # 运行 Vitest 测试</pre>
+        </div>
+        <div>
+          <div class="copy-row">
+            <strong>用户级服务</strong>
+            <button class="copy-btn" data-copy="service">复制</button>
+          </div>
+          <pre id="service">npm run install:service
+systemctl --user start crypto-agent
+systemctl --user status crypto-agent
+tail -f ~/.local/state/crypto-agent/daemon.err</pre>
+        </div>
+      </div>
+
+      <div style="height:16px"></div>
+      <div class="callout red">
+        <strong>当前可观测性注意点</strong><br>
+        Heartbeat 通过 <code>HeartbeatScheduler</code> 运行，但 "All clear" 结果不会持久化。
+        持久化设计文档明确把 heartbeat 最近运行元数据延后实现。如果需要可审计的 uptime 和健康检查，
+        应增加 <code>daemon_state.last_heartbeat_at</code>、<code>last_heartbeat_result</code>，或记录所有 heartbeat 结果。
+      </div>
+    </section>
+
+    <section id="source">
+      <div class="section-head">
+        <h2>源码依据</h2>
+        <p class="section-copy">
+          这页是代码库梳理，不是营销文案。上面的判断来自以下本地文件。
+        </p>
+      </div>
+
+      <ul class="source-list">
+        <li><code>README.md</code> 和 <code>package.json</code></li>
+        <li><code>src/daemon.ts</code></li>
+        <li><code>src/agent.ts</code></li>
+        <li><code>src/config.ts</code></li>
+        <li><code>src/ipc/protocol.ts</code>, <code>server.ts</code>, <code>client.ts</code></li>
+        <li><code>src/tools/index.ts</code>, <code>registry.ts</code></li>
+        <li><code>src/exchange/base.ts</code>, <code>manager.ts</code>, <code>paper.ts</code>, <code>live.ts</code></li>
+        <li><code>src/strategy/manager.ts</code>, <code>runtime.ts</code>, <code>executor.ts</code>, <code>risk-gate.ts</code>, <code>evaluator.ts</code></li>
+        <li><code>src/market-feed.ts</code></li>
+        <li><code>src/trade-lock.ts</code>, <code>src/trade-guard.ts</code></li>
+        <li><code>src/memory.ts</code></li>
+        <li><code>src/context.ts</code>, <code>src/world-snapshot.ts</code>, <code>src/heartbeat.ts</code>, <code>src/sub-agents.ts</code></li>
+        <li><code>docs/persistence.md</code></li>
+        <li><code>systemd/crypto-agent.service.template</code>, <code>scripts/install-daemon.sh</code></li>
+      </ul>
+    </section>
+
+    <footer class="footer">
+      <p>
+        来源说明：2026-06-18 扫描了本地仓库的 <code>src/</code>、<code>test/</code>、<code>docs/</code>、
+        <code>scripts/</code>、<code>systemd/</code> 和 <code>skills/</code>。该范围内共有 113 个文件，
+        包括 75 个 TypeScript 源文件和 30 个 Vitest 文件。本页阅读并总结了上面列出的关键架构文件；
+        不声称逐行阅读了每一个工具 handler 或每一个测试文件。
+      </p>
+      <p>
+        风格说明：页面采用 Claude 风格的暖色文档视觉，但技术结构来自本地源码。
+      </p>
+    </footer>
+  </main>
+
+  <script>
+    const tabs = document.querySelectorAll(".tab");
+    const panels = {
+      chat: document.getElementById("flow-chat"),
+      strategy: document.getElementById("flow-strategy"),
+      startup: document.getElementById("flow-startup"),
+      risk: document.getElementById("flow-risk")
+    };
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const key = tab.dataset.flow;
+        tabs.forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+        Object.entries(panels).forEach(([name, panel]) => {
+          panel.classList.toggle("active", name === key);
+        });
+      });
+    });
+
+    document.querySelectorAll("[data-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.copy;
+        const el = document.getElementById(id);
+        if (!el) return;
+        try {
+          await navigator.clipboard.writeText(el.textContent.trim());
+          const old = button.textContent;
+          button.textContent = "已复制";
+          setTimeout(() => { button.textContent = old; }, 1200);
+        } catch {
+          button.textContent = "复制失败";
+          setTimeout(() => { button.textContent = "复制"; }, 1200);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

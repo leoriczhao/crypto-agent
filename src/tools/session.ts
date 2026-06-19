@@ -23,7 +23,9 @@ registerTool(
 
       if (action === "current") {
         const s = mgr.active;
-        return `Current session: "${s.name}" (${s.id.slice(0, 8)}…)\nType: ${s.type}\nMessages: ${s.messages.length}\nCreated: ${s.createdAt.toISOString()}\nLast active: ${s.lastActiveAt.toISOString()}`;
+        const binding = agent.memory?.getSessionBinding?.(s.id);
+        const botLine = binding ? `\nBot: ${binding.botId}\nAccount: ${binding.tradingAccountId}` : "";
+        return `Current session: "${s.name}" (${s.id.slice(0, 8)}…)\nType: ${s.type}${botLine}\nMessages: ${s.messages.length}\nCreated: ${s.createdAt.toISOString()}\nLast active: ${s.lastActiveAt.toISOString()}`;
       }
 
       if (action === "list") {
@@ -40,7 +42,8 @@ registerTool(
         if (!name) return "Error: provide a name for the new session.";
         const session = mgr.create(name, "user");
         if (agent.memory) {
-          agent.memory.createSession(session.id, name, "user");
+          const bot = agent.memory.getDefaultBot?.();
+          agent.memory.createSession(session.id, name, "user", bot?.id ?? null);
         }
         mgr.setActive(session.id);
         return `Created and switched to session "${name}" (${session.id.slice(0, 8)}…)`;
@@ -51,6 +54,10 @@ registerTool(
         const s = mgr.get(session_id);
         if (s.type !== "user") return "Error: cannot switch to a system session.";
         mgr.setActive(session_id);
+        const bot = agent.memory?.getDefaultBot?.();
+        if (agent.memory && bot && !agent.memory.getSessionBinding?.(session_id)) {
+          agent.memory.bindSessionToBot(session_id, bot.id);
+        }
         return `Switched to session "${s.name}" (${s.id.slice(0, 8)}…) — ${s.messages.length} messages`;
       }
 

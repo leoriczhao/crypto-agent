@@ -4,13 +4,15 @@ import { config } from "./config.js";
 import { PaperExchange } from "./exchange/paper.js";
 import { LiveExchange } from "./exchange/live.js";
 import { ExchangeManager } from "./exchange/manager.js";
-import { TOOL_DEFINITIONS, TOOL_HANDLERS, TOOL_DEPS } from "./tools/registry.js";
+import { TOOL_DEFINITIONS } from "./tools/registry.js";
 import { Soul } from "./soul.js";
 import { SkillLoader } from "./skill-loader.js";
 import { SessionManager } from "./session.js";
 import { microCompact, autoCompact } from "./context.js";
-import { openaiChatCompletionKwargs, anthropicMessageKwargs } from "./llm/provider.js";
 import { buildWorldSnapshot } from "./world-snapshot.js";
+import { type AgentToolDeps } from "./agent/tool-dispatch.js";
+import { createAgentGraphRuntime } from "./agent/langgraph-runtime.js";
+import type { AgentMessage } from "./agent/provider-step.js";
 import type { Memory } from "./memory.js";
 import type { StrategyManager } from "./strategy/manager.js";
 import "./tools/index.js";
@@ -44,13 +46,6 @@ Rules:
 - Symbols are formatted as BTC/USDT, ETH/USDT, etc.
 `;
 
-function openaiTools() {
-  return TOOL_DEFINITIONS.map((t) => ({
-    type: "function" as const,
-    function: { name: t.name, description: t.description, parameters: t.input_schema },
-  }));
-}
-
 export class CryptoAgent {
   exchangeManager: ExchangeManager;
   soul: Soul;
@@ -60,6 +55,7 @@ export class CryptoAgent {
   strategyStore: StrategyManager | null = null;
   provider: string;
   client: any;
+  private langGraphRuntime = createAgentGraphRuntime();
 
   constructor() {
     this.exchangeManager = new ExchangeManager();
@@ -108,29 +104,18 @@ export class CryptoAgent {
     return SYSTEM_BASE + `\nSkills available (use load_skill to access):\n${skillsSection}` + this.soul.systemModifier;
   }
 
-  private async dispatchTool(
-    name: string,
-    inputs: Record<string, any>,
-    sessionId: string,
-  ): Promise<string> {
-    const handler = TOOL_HANDLERS[name];
-    if (!handler) return `Unknown tool: ${name}`;
-
-    const deps = TOOL_DEPS[name] ?? [];
-    const depMap: Record<string, () => any> = {
-      exchange: () => this.exchange,
-      config: () => config,
-      memory: () => this.memory,
-      sessionId: () => sessionId,
-      soul: () => this.soul.profile,
-      exchange_manager: () => this.exchangeManager,
-      agent: () => this,
-      skill_loader: () => this.skillLoader,
-      strategy_store: () => this.strategyStore,
+  private createToolDeps(sessionId: string): AgentToolDeps {
+    return {
+      getExchange: () => this.exchange,
+      getConfig: () => config,
+      getMemory: () => this.memory,
+      getSessionId: () => sessionId,
+      getSoul: () => this.soul.profile,
+      getExchangeManager: () => this.exchangeManager,
+      getAgent: () => this,
+      getSkillLoader: () => this.skillLoader,
+      getStrategyStore: () => this.strategyStore,
     };
-    const resolved: Record<string, any> = {};
-    for (const d of deps) resolved[d] = depMap[d]?.();
-    return handler({ ...resolved, ...inputs });
   }
 
   private async buildFullSystemPrompt(): Promise<string> {
@@ -167,8 +152,17 @@ export class CryptoAgent {
 
     const sysPrompt = await this.buildFullSystemPrompt();
     throwIfCancelled(callbacks.signal);
-    if (this.provider === "openai") return this.streamOpenai(session.messages, sessionId, callbacks, sysPrompt);
-    return this.streamAnthropic(session.messages, sessionId, callbacks, sysPrompt);
+    const result = await this.langGraphRuntime.run({
+      provider: this.provider,
+      client: this.client,
+      messages: session.messages as AgentMessage[],
+      systemPrompt: sysPrompt,
+      sessionId,
+      callbacks,
+      toolDeps: this.createToolDeps(sessionId),
+    });
+    session.messages = result.messages;
+    return result.finalText;
   }
 
   async chat(userMessage: string): Promise<string> {
@@ -180,121 +174,6 @@ export class CryptoAgent {
     callbacks: ChatCallbacks = {},
   ): Promise<string> {
     return this.chatInSession(this.sessions.activeId, userMessage, callbacks);
-  }
-
-  private async streamOpenai(
-    messages: any[],
-    sessionId: string,
-    cb: ChatCallbacks,
-    sysPrompt?: string,
-  ): Promise<string> {
-    const tools = openaiTools();
-    const baseKw = openaiChatCompletionKwargs(config);
-    const systemContent = sysPrompt ?? this.systemPrompt;
-
-    while (true) {
-      throwIfCancelled(cb.signal);
-      const stream = await this.client.chat.completions.create({
-        messages: [{ role: "system", content: systemContent }, ...messages],
-        tools,
-        stream: true,
-        ...baseKw,
-      }, { signal: cb.signal });
-
-      let fullContent = "";
-      const tcMap: Record<number, { id: string; function: { name: string; arguments: string } }> = {};
-
-      for await (const chunk of stream) {
-        throwIfCancelled(cb.signal);
-        const delta = chunk.choices?.[0]?.delta;
-        if (!delta) continue;
-        if (delta.content) {
-          fullContent += delta.content;
-          if (!cb.signal?.aborted) cb.onDelta?.(fullContent);
-        }
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            if (!tcMap[idx]) tcMap[idx] = { id: "", function: { name: "", arguments: "" } };
-            if (tc.id) tcMap[idx].id = tc.id;
-            if (tc.function?.name) tcMap[idx].function.name += tc.function.name;
-            if (tc.function?.arguments) tcMap[idx].function.arguments += tc.function.arguments;
-          }
-        }
-      }
-
-      const toolCalls = Object.values(tcMap);
-      if (!toolCalls.length) {
-        messages.push({ role: "assistant", content: fullContent });
-        return fullContent;
-      }
-
-      messages.push({
-        role: "assistant",
-        content: fullContent || null,
-        tool_calls: toolCalls.map((tc) => ({
-          id: tc.id,
-          type: "function",
-          function: { name: tc.function.name, arguments: tc.function.arguments },
-        })),
-      });
-
-      for (const tc of toolCalls) {
-        throwIfCancelled(cb.signal);
-        cb.onToolUse?.(tc.function.name);
-        const args = JSON.parse(tc.function.arguments);
-        const output = await this.dispatchTool(tc.function.name, args, sessionId);
-        throwIfCancelled(cb.signal);
-        messages.push({ role: "tool", tool_call_id: tc.id, content: output });
-      }
-    }
-  }
-
-  private async streamAnthropic(
-    messages: any[],
-    sessionId: string,
-    cb: ChatCallbacks,
-    sysPrompt?: string,
-  ): Promise<string> {
-    const baseKw = anthropicMessageKwargs(config);
-    const systemContent = sysPrompt ?? this.systemPrompt;
-
-    while (true) {
-      throwIfCancelled(cb.signal);
-      const stream = this.client.messages.stream({
-        system: systemContent,
-        messages,
-        tools: TOOL_DEFINITIONS,
-        ...baseKw,
-      }, { signal: cb.signal });
-
-      let fullText = "";
-      stream.on("text", (text: string) => {
-        if (cb.signal?.aborted) return;
-        fullText += text;
-        cb.onDelta?.(fullText);
-      });
-
-      const response = await stream.finalMessage();
-      throwIfCancelled(cb.signal);
-      messages.push({ role: "assistant", content: response.content });
-
-      if (response.stop_reason !== "tool_use") {
-        return fullText || response.content.filter((b: any) => b.text).map((b: any) => b.text).join("\n");
-      }
-
-      const results: any[] = [];
-      for (const block of response.content) {
-        if (block.type === "tool_use") {
-          throwIfCancelled(cb.signal);
-          cb.onToolUse?.(block.name);
-          const output = await this.dispatchTool(block.name, block.input, sessionId);
-          throwIfCancelled(cb.signal);
-          results.push({ type: "tool_result", tool_use_id: block.id, content: output });
-        }
-      }
-      messages.push({ role: "user", content: results });
-    }
   }
 
   async close(): Promise<void> {

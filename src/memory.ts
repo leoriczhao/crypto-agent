@@ -8,6 +8,7 @@ export interface SessionRow {
   id: string;
   name: string;
   type: SessionType;
+  bot_id: string | null;
   created_at: string;
   last_active_at: string;
 }
@@ -24,11 +25,56 @@ export interface TradeRow {
   mode: string;
   reasoning: string;
   created_at: string;
+  botId: string | null;
+  tradingAccountId: string | null;
+}
+
+export interface FundingAccountRow {
+  id: string;
+  name: string;
+  baseCurrency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TradingAccountRow {
+  id: string;
+  fundingAccountId: string;
+  exchangeId: string;
+  mode: string;
+  label: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TradingBotRow {
+  id: string;
+  tradingAccountId: string;
+  name: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DefaultIdentity {
+  fundingAccount: FundingAccountRow;
+  tradingAccount: TradingAccountRow;
+  bot: TradingBotRow;
+}
+
+export interface SessionBinding {
+  sessionId: string;
+  botId: string;
+  tradingAccountId: string;
+  fundingAccountId: string;
 }
 
 export interface PersistedActivePosition {
   ruleId: string;
   strategyId: string | null;
+  botId?: string | null;
+  tradingAccountId?: string | null;
   symbol: string;
   side: "long" | "short";
   entryPrice: number;
@@ -44,6 +90,8 @@ export interface PersistedPendingOrder {
   exchangeOrderId: string | null;
   sessionId: string | null;
   strategyId: string | null;
+  botId: string | null;
+  tradingAccountId: string | null;
   positionId: string | null;
   action: "enter" | "exit" | null;
   symbol: string;
@@ -74,6 +122,8 @@ export interface StrategyKbEntry {
 
 export class Memory {
   private db: Database.Database;
+  private defaultBotId: string | null = null;
+  private defaultTradingAccountId: string | null = null;
 
   constructor(dbPath = "crypto_agent.db") {
     this.db = new Database(dbPath);
@@ -84,12 +134,44 @@ export class Memory {
 
   private initTables(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS funding_accounts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        base_currency TEXT NOT NULL DEFAULT 'USDT',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS trading_accounts (
+        id TEXT PRIMARY KEY,
+        funding_account_id TEXT NOT NULL,
+        exchange_id TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        label TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (funding_account_id) REFERENCES funding_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS trading_bots (
+        id TEXT PRIMARY KEY,
+        trading_account_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (trading_account_id) REFERENCES trading_accounts(id)
+      );
+
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         type TEXT NOT NULL DEFAULT 'user',
+        bot_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (bot_id) REFERENCES trading_bots(id)
       );
 
       CREATE TABLE IF NOT EXISTS conversations (
@@ -112,8 +194,12 @@ export class Memory {
         order_type TEXT DEFAULT 'market',
         mode TEXT DEFAULT 'PAPER',
         reasoning TEXT DEFAULT '',
+        bot_id TEXT,
+        trading_account_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (session_id) REFERENCES sessions(id)
+        FOREIGN KEY (session_id) REFERENCES sessions(id),
+        FOREIGN KEY (bot_id) REFERENCES trading_bots(id),
+        FOREIGN KEY (trading_account_id) REFERENCES trading_accounts(id)
       );
 
       CREATE TABLE IF NOT EXISTS session_summaries (
@@ -159,6 +245,8 @@ export class Memory {
       CREATE TABLE IF NOT EXISTS active_positions (
         rule_id TEXT PRIMARY KEY,
         strategy_id TEXT,
+        bot_id TEXT,
+        trading_account_id TEXT,
         symbol TEXT NOT NULL,
         side TEXT NOT NULL,
         entry_price REAL NOT NULL,
@@ -183,6 +271,8 @@ export class Memory {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         exchange_order_id TEXT,
         session_id TEXT,
+        bot_id TEXT,
+        trading_account_id TEXT,
         symbol TEXT NOT NULL,
         side TEXT NOT NULL,
         order_type TEXT NOT NULL,
@@ -218,6 +308,8 @@ export class Memory {
         params TEXT NOT NULL,
         allocated_usdt REAL NOT NULL DEFAULT 0,
         enabled INTEGER NOT NULL DEFAULT 1,
+        bot_id TEXT,
+        trading_account_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
@@ -251,9 +343,33 @@ export class Memory {
       this.db.prepare("UPDATE conversations SET session_id = ?").run(legacyId);
     }
 
+    this.migrateAddIdentityColumns();
     this.migrateLegacyRulesToStrategies();
     this.migrateAddStrategyIdColumn();
     this.migrateAddPendingOrderStrategyColumns();
+  }
+
+  private ensureColumn(table: string, column: string, type: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  }
+
+  /**
+   * Add identity columns to existing databases. New databases already get
+   * these from CREATE TABLE, but old DBs need an idempotent migration.
+   */
+  private migrateAddIdentityColumns(): void {
+    this.ensureColumn("sessions", "bot_id", "TEXT");
+    this.ensureColumn("trades", "bot_id", "TEXT");
+    this.ensureColumn("trades", "trading_account_id", "TEXT");
+    this.ensureColumn("pending_orders", "bot_id", "TEXT");
+    this.ensureColumn("pending_orders", "trading_account_id", "TEXT");
+    this.ensureColumn("active_positions", "bot_id", "TEXT");
+    this.ensureColumn("active_positions", "trading_account_id", "TEXT");
+    this.ensureColumn("strategies", "bot_id", "TEXT");
+    this.ensureColumn("strategies", "trading_account_id", "TEXT");
   }
 
   /**
@@ -281,14 +397,8 @@ export class Memory {
    * budget accounting can attribute rows to a Strategy. Safe idempotent.
    */
   private migrateAddStrategyIdColumn(): void {
-    const ensureColumn = (table: string, column: string, type: string) => {
-      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-      if (!cols.some((c) => c.name === column)) {
-        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-      }
-    };
-    ensureColumn("trades", "strategy_id", "TEXT");
-    ensureColumn("active_positions", "strategy_id", "TEXT");
+    this.ensureColumn("trades", "strategy_id", "TEXT");
+    this.ensureColumn("active_positions", "strategy_id", "TEXT");
   }
 
   /**
@@ -339,12 +449,193 @@ export class Memory {
     }
   }
 
+  private identityKeyPart(value: string): string {
+    const key = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+    return key || "default";
+  }
+
+  private botIdOrDefault(botId?: string | null): string | null {
+    return botId === undefined ? this.defaultBotId : botId;
+  }
+
+  private tradingAccountIdOrDefault(tradingAccountId?: string | null): string | null {
+    return tradingAccountId === undefined ? this.defaultTradingAccountId : tradingAccountId;
+  }
+
+  private rowToFundingAccount(r: any): FundingAccountRow {
+    return {
+      id: r.id,
+      name: r.name,
+      baseCurrency: r.base_currency,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  private rowToTradingAccount(r: any): TradingAccountRow {
+    return {
+      id: r.id,
+      fundingAccountId: r.funding_account_id,
+      exchangeId: r.exchange_id,
+      mode: r.mode,
+      label: r.label,
+      status: r.status,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  private rowToTradingBot(r: any): TradingBotRow {
+    return {
+      id: r.id,
+      tradingAccountId: r.trading_account_id,
+      name: r.name,
+      status: r.status,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  private backfillDefaultIdentity(botId: string, tradingAccountId: string): void {
+    this.db.prepare("UPDATE sessions SET bot_id = ? WHERE bot_id IS NULL").run(botId);
+    for (const table of ["trades", "pending_orders", "active_positions", "strategies"]) {
+      this.db
+        .prepare(
+          `UPDATE ${table}
+           SET
+             bot_id = COALESCE(bot_id, ?),
+             trading_account_id = COALESCE(trading_account_id, ?)
+           WHERE bot_id IS NULL OR trading_account_id IS NULL`,
+        )
+        .run(botId, tradingAccountId);
+    }
+  }
+
+  // --- Identity model ---
+
+  ensureDefaultIdentity(opts: {
+    exchangeId: string;
+    mode: string;
+    name?: string;
+    baseCurrency?: string;
+  }): DefaultIdentity {
+    const mode = opts.mode.toUpperCase();
+    const exchangeId = opts.exchangeId.trim() || "default";
+    const name = opts.name?.trim() || "default";
+    const fundingId = "default-funding";
+    const tradingAccountId = `default-trading-${this.identityKeyPart(exchangeId)}-${this.identityKeyPart(mode)}`;
+    const botId = "default-bot";
+
+    this.db
+      .prepare(
+        `INSERT INTO funding_accounts (id, name, base_currency)
+         VALUES (?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           base_currency = excluded.base_currency,
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(fundingId, name, opts.baseCurrency ?? "USDT");
+
+    this.db
+      .prepare(
+        `INSERT INTO trading_accounts (id, funding_account_id, exchange_id, mode, label, status)
+         VALUES (?, ?, ?, ?, ?, 'active')
+         ON CONFLICT(id) DO UPDATE SET
+           funding_account_id = excluded.funding_account_id,
+           exchange_id = excluded.exchange_id,
+           mode = excluded.mode,
+           label = excluded.label,
+           status = 'active',
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(tradingAccountId, fundingId, exchangeId, mode, `${name}:${exchangeId}:${mode}`);
+
+    this.db
+      .prepare(
+        `INSERT INTO trading_bots (id, trading_account_id, name, status)
+         VALUES (?, ?, ?, 'active')
+         ON CONFLICT(id) DO UPDATE SET
+           trading_account_id = excluded.trading_account_id,
+           name = excluded.name,
+           status = 'active',
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(botId, tradingAccountId, name);
+
+    this.defaultBotId = botId;
+    this.defaultTradingAccountId = tradingAccountId;
+    this.backfillDefaultIdentity(botId, tradingAccountId);
+
+    return {
+      fundingAccount: this.getFundingAccount(fundingId)!,
+      tradingAccount: this.getTradingAccount(tradingAccountId)!,
+      bot: this.getTradingBot(botId)!,
+    };
+  }
+
+  getFundingAccount(id: string): FundingAccountRow | null {
+    const row = this.db.prepare("SELECT * FROM funding_accounts WHERE id = ?").get(id);
+    return row ? this.rowToFundingAccount(row) : null;
+  }
+
+  getTradingAccount(id: string): TradingAccountRow | null {
+    const row = this.db.prepare("SELECT * FROM trading_accounts WHERE id = ?").get(id);
+    return row ? this.rowToTradingAccount(row) : null;
+  }
+
+  getTradingBot(id: string): TradingBotRow | null {
+    const row = this.db.prepare("SELECT * FROM trading_bots WHERE id = ?").get(id);
+    return row ? this.rowToTradingBot(row) : null;
+  }
+
+  getDefaultBot(): TradingBotRow | null {
+    return this.getTradingBot("default-bot");
+  }
+
+  listTradingBots(): TradingBotRow[] {
+    const rows = this.db.prepare("SELECT * FROM trading_bots ORDER BY created_at").all() as any[];
+    return rows.map((r) => this.rowToTradingBot(r));
+  }
+
+  bindSessionToBot(sessionId: string, botId: string): void {
+    const bot = this.getTradingBot(botId);
+    if (!bot) throw new Error(`Trading bot not found: ${botId}`);
+    this.db
+      .prepare("UPDATE sessions SET bot_id = ?, last_active_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(botId, sessionId);
+  }
+
+  getSessionBinding(sessionId: string): SessionBinding | null {
+    const row = this.db
+      .prepare(
+        `SELECT
+           s.id AS session_id,
+           b.id AS bot_id,
+           ta.id AS trading_account_id,
+           fa.id AS funding_account_id
+         FROM sessions s
+         JOIN trading_bots b ON b.id = s.bot_id
+         JOIN trading_accounts ta ON ta.id = b.trading_account_id
+         JOIN funding_accounts fa ON fa.id = ta.funding_account_id
+         WHERE s.id = ?`,
+      )
+      .get(sessionId) as any | undefined;
+    if (!row) return null;
+    return {
+      sessionId: row.session_id,
+      botId: row.bot_id,
+      tradingAccountId: row.trading_account_id,
+      fundingAccountId: row.funding_account_id,
+    };
+  }
+
   // --- Session CRUD ---
 
-  createSession(id: string, name: string, type: SessionType): void {
+  createSession(id: string, name: string, type: SessionType, botId?: string | null): void {
     this.db
-      .prepare("INSERT OR IGNORE INTO sessions (id, name, type) VALUES (?, ?, ?)")
-      .run(id, name, type);
+      .prepare("INSERT OR IGNORE INTO sessions (id, name, type, bot_id) VALUES (?, ?, ?, ?)")
+      .run(id, name, type, botId ?? null);
   }
 
   getSession(id: string): SessionRow | null {
@@ -420,16 +711,21 @@ export class Memory {
       mode?: string;
       reasoning?: string;
       strategyId?: string | null;
+      botId?: string | null;
+      tradingAccountId?: string | null;
     },
   ): void {
     this.db
       .prepare(
-        `INSERT INTO trades (session_id, strategy_id, symbol, side, amount, price, order_type, mode, reasoning)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO trades
+         (session_id, strategy_id, bot_id, trading_account_id, symbol, side, amount, price, order_type, mode, reasoning)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sessionId,
         data.strategyId ?? null,
+        this.botIdOrDefault(data.botId),
+        this.tradingAccountIdOrDefault(data.tradingAccountId),
         data.symbol,
         data.side,
         data.amount,
@@ -440,22 +736,33 @@ export class Memory {
       );
   }
 
+  private rowToTrade(r: any): TradeRow {
+    return {
+      ...r,
+      botId: r.bot_id ?? null,
+      tradingAccountId: r.trading_account_id ?? null,
+    } as TradeRow;
+  }
+
   getRecentTrades(limit = 20): TradeRow[] {
-    return this.db
+    const rows = this.db
       .prepare("SELECT * FROM trades ORDER BY id DESC LIMIT ?")
-      .all(limit) as TradeRow[];
+      .all(limit) as any[];
+    return rows.map((r) => this.rowToTrade(r));
   }
 
   getTradesBySession(sessionId: string, limit = 50): TradeRow[] {
-    return this.db
+    const rows = this.db
       .prepare("SELECT * FROM trades WHERE session_id = ? ORDER BY id DESC LIMIT ?")
-      .all(sessionId, limit) as TradeRow[];
+      .all(sessionId, limit) as any[];
+    return rows.map((r) => this.rowToTrade(r));
   }
 
   getTradesByStrategy(strategyId: string, limit = 500): TradeRow[] {
-    return this.db
+    const rows = this.db
       .prepare("SELECT * FROM trades WHERE strategy_id = ? ORDER BY id ASC LIMIT ?")
-      .all(strategyId, limit) as TradeRow[];
+      .all(strategyId, limit) as any[];
+    return rows.map((r) => this.rowToTrade(r));
   }
 
   // --- Session Summaries ---
@@ -556,8 +863,8 @@ export class Memory {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO strategies
-         (id, kind, symbol, params, allocated_usdt, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, kind, symbol, params, allocated_usdt, enabled, bot_id, trading_account_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         snap.id,
@@ -566,6 +873,8 @@ export class Memory {
         JSON.stringify(snap.params),
         snap.allocatedUsdt,
         snap.enabled ? 1 : 0,
+        this.botIdOrDefault(snap.botId),
+        this.tradingAccountIdOrDefault(snap.tradingAccountId),
         snap.createdAt,
         snap.updatedAt,
       );
@@ -578,7 +887,7 @@ export class Memory {
   loadAllStrategies(): StrategySnapshot[] {
     const rows = this.db
       .prepare(
-        `SELECT id, kind, symbol, params, allocated_usdt, enabled, created_at, updated_at
+        `SELECT id, kind, symbol, params, allocated_usdt, enabled, bot_id, trading_account_id, created_at, updated_at
          FROM strategies ORDER BY created_at`,
       )
       .all() as Array<{
@@ -588,6 +897,8 @@ export class Memory {
         params: string;
         allocated_usdt: number;
         enabled: number;
+        bot_id: string | null;
+        trading_account_id: string | null;
         created_at: string;
         updated_at: string;
       }>;
@@ -598,6 +909,8 @@ export class Memory {
       params: JSON.parse(r.params),
       allocatedUsdt: r.allocated_usdt,
       enabled: Boolean(r.enabled),
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }));
@@ -622,12 +935,14 @@ export class Memory {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO active_positions
-         (rule_id, strategy_id, symbol, side, entry_price, amount, stop_loss, take_profit, entered_at, source, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+         (rule_id, strategy_id, bot_id, trading_account_id, symbol, side, entry_price, amount, stop_loss, take_profit, entered_at, source, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       )
       .run(
         pos.ruleId,
         pos.strategyId ?? pos.ruleId, // strategyId defaults to ruleId for legacy callers
+        this.botIdOrDefault(pos.botId),
+        this.tradingAccountIdOrDefault(pos.tradingAccountId),
         pos.symbol,
         pos.side,
         pos.entryPrice,
@@ -646,12 +961,14 @@ export class Memory {
   loadActivePositions(): PersistedActivePosition[] {
     const rows = this.db
       .prepare(
-        `SELECT rule_id, strategy_id, symbol, side, entry_price, amount, stop_loss, take_profit, entered_at, source
+        `SELECT rule_id, strategy_id, bot_id, trading_account_id, symbol, side, entry_price, amount, stop_loss, take_profit, entered_at, source
          FROM active_positions ORDER BY entered_at ASC`,
       )
       .all() as Array<{
         rule_id: string;
         strategy_id: string | null;
+        bot_id: string | null;
+        trading_account_id: string | null;
         symbol: string;
         side: "long" | "short";
         entry_price: number;
@@ -664,6 +981,8 @@ export class Memory {
     return rows.map((r) => ({
       ruleId: r.rule_id,
       strategyId: r.strategy_id,
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
       symbol: r.symbol,
       side: r.side,
       entryPrice: r.entry_price,
@@ -703,6 +1022,8 @@ export class Memory {
   createPendingOrder(opts: {
     sessionId?: string | null;
     strategyId?: string | null;
+    botId?: string | null;
+    tradingAccountId?: string | null;
     positionId?: string | null;
     action?: "enter" | "exit" | null;
     symbol: string;
@@ -715,12 +1036,14 @@ export class Memory {
     const result = this.db
       .prepare(
         `INSERT INTO pending_orders
-         (session_id, strategy_id, position_id, action, exchange_order_id, symbol, side, order_type, price, amount, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+         (session_id, strategy_id, bot_id, trading_account_id, position_id, action, exchange_order_id, symbol, side, order_type, price, amount, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
       )
       .run(
         opts.sessionId ?? null,
         opts.strategyId ?? null,
+        this.botIdOrDefault(opts.botId),
+        this.tradingAccountIdOrDefault(opts.tradingAccountId),
         opts.positionId ?? null,
         opts.action ?? null,
         opts.exchangeOrderId ?? null,
@@ -751,7 +1074,7 @@ export class Memory {
   }
 
   private readonly pendingOrderCols =
-    "id, exchange_order_id, session_id, strategy_id, position_id, action, symbol, side, order_type, price, amount, status, created_at";
+    "id, exchange_order_id, session_id, strategy_id, bot_id, trading_account_id, position_id, action, symbol, side, order_type, price, amount, status, created_at";
 
   private rowToPendingOrder(r: any): PersistedPendingOrder {
     return {
@@ -759,6 +1082,8 @@ export class Memory {
       exchangeOrderId: r.exchange_order_id,
       sessionId: r.session_id,
       strategyId: r.strategy_id,
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
       positionId: r.position_id,
       action: r.action,
       symbol: r.symbol,
