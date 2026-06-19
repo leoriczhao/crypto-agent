@@ -115,7 +115,7 @@ class CryptoDaemon {
       }
     }
     const savedExchange = this.memory.getDaemonState("active_exchange");
-    if (savedExchange) {
+    if (savedExchange && !config.paperTrading) {
       try {
         this.agent.exchangeManager.setActive(savedExchange);
         this.log(`Restored active exchange: ${savedExchange}`);
@@ -127,7 +127,7 @@ class CryptoDaemon {
 
   private ensureDefaultIdentity(): DefaultIdentity {
     const identity = this.memory.ensureDefaultIdentity({
-      exchangeId: this.agent.exchangeManager.activeId || config.defaultExchange,
+      exchangeId: config.paperTrading ? config.defaultExchange : (this.agent.exchangeManager.activeId || config.defaultExchange),
       mode: config.paperTrading ? "PAPER" : "LIVE",
       name: "default",
     });
@@ -141,29 +141,41 @@ class CryptoDaemon {
   }
 
   private initFastPath(): void {
-    const activeEx = this.agent.exchange as any;
-    const ccxt = activeEx?.ccxtInstance;
-    if (!ccxt) {
-      this.log(`Fast path: skipped (active exchange exposes no ccxt instance)`);
+    const liveExchange = config.paperTrading ? null : this.agent.exchange;
+    const broker = config.paperTrading ? this.agent.broker : null;
+    if (config.paperTrading && !broker) {
+      this.log(`Fast path: skipped (paper broker is not initialized)`);
       return;
     }
 
     try {
-      this.marketFeed = new MarketFeed(ccxt);
-      this.riskGate = new RiskGate(this.strategyStore, activeEx, config.initialBalance.USDT ?? 10000, this.memory);
+      this.marketFeed = new MarketFeed(this.agent.marketData);
+      this.riskGate = new RiskGate({
+        store: this.strategyStore,
+        initialPortfolioValue: config.initialBalance.USDT ?? 10000,
+        memory: this.memory,
+        exchange: liveExchange,
+        broker,
+        botId: this.activeIdentity.bot.id,
+      });
       this.runtime = new StrategyRuntime({
         feed: this.marketFeed,
         manager: this.strategyStore,
         memory: this.memory,
-        exchange: activeEx,
+        exchange: liveExchange,
+        broker,
       });
       this.executor = new OrderExecutor({
-        exchange: activeEx,
+        marketData: this.agent.marketData,
+        exchange: liveExchange,
+        broker,
         feed: this.marketFeed,
         riskGate: this.riskGate,
         store: this.strategyStore,
         memory: this.memory,
         paperMode: config.paperTrading,
+        botId: this.activeIdentity.bot.id,
+        tradingAccountId: this.activeIdentity.tradingAccount.id,
       });
 
       this.runtime.on("signal", (signal) => {
@@ -218,34 +230,28 @@ class CryptoDaemon {
         });
       });
 
-      // Drive Paper-mode limit-order matching off the MarketFeed tick stream.
-      // Every ticker update → check if any open limit orders on that symbol
-      // cross their trigger price; fill them in-memory. Live mode runs its
-      // own order lifecycle (REST polling TBD).
-      if (typeof (activeEx as any).processTick === "function") {
+      if (broker) {
+        const processedFillIds = new Set<number>();
         this.marketFeed.on("tick", (tick) => {
           try {
-            (activeEx as any).processTick(tick.symbol, tick.last);
+            broker.markToMarket(tick.symbol, tick.last)
+              .then(() => {
+                const fills = this.memory.listPaperFills({
+                  tradingAccountId: this.activeIdentity.tradingAccount.id,
+                  botId: this.activeIdentity.bot.id,
+                });
+                for (const fill of fills) {
+                  if (processedFillIds.has(fill.id)) continue;
+                  processedFillIds.add(fill.id);
+                  this.executor
+                    ?.onExchangeFill(fill.orderId, fill.price)
+                    .catch((e: any) => this.log(`[Limit fill error] ${e.message ?? e}`));
+                }
+              })
+              .catch((e: any) => this.log(`[Paper mark error] ${e.message ?? e}`));
           } catch (e: any) {
-            this.log(`[Paper processTick error] ${e.message ?? e}`);
+            this.log(`[Paper tick error] ${e.message ?? e}`);
           }
-        });
-      }
-
-      // Paper exchange emits orderFilled when a limit order crosses — route it
-      // to the executor so the async fill becomes a real position + event.
-      if (typeof (activeEx as any).on === "function") {
-        (activeEx as any).on("orderFilled", (order: any) => {
-          this.executor
-            ?.onExchangeFill(order.id, order.price)
-            .catch((e: any) => this.log(`[Limit fill error] ${e.message ?? e}`));
-        });
-        (activeEx as any).on("orderCancelled", (order: any) => {
-          // Roll the pending_orders row forward so we don't try to resume it.
-          try {
-            const pending = this.memory.getPendingOrderByExchangeId(order.id);
-            if (pending) this.memory.updatePendingOrder(pending.id, { status: "cancelled" });
-          } catch {}
         });
       }
 
@@ -463,8 +469,12 @@ class CryptoDaemon {
         const budgets = this.strategyStore.listBudgets();
         let accountTotal = 0;
         try {
-          const balance = await this.agent.exchange.fetchBalance();
-          const positions = await this.agent.exchange.fetchPositions();
+          const balance = config.paperTrading && this.agent.broker
+            ? await this.agent.broker.fetchBalance(this.activeIdentity.bot.id)
+            : await this.agent.exchange.fetchBalance();
+          const positions = config.paperTrading && this.agent.broker
+            ? await this.agent.broker.fetchPositions(this.activeIdentity.bot.id)
+            : await this.agent.exchange.fetchPositions();
           const usdtFree = balance.USDT?.total ?? balance.USDT?.free ?? 0;
           let exposure = 0;
           for (const pos of Object.values(positions) as any[]) {
@@ -593,11 +603,12 @@ class CryptoDaemon {
   private async buildStatus() {
     let snapshot = "(snapshot unavailable)";
     try {
-      snapshot = await buildWorldSnapshot(this.agent.exchange, {
+      snapshot = await buildWorldSnapshot({
         paperTrading: config.paperTrading,
         strategyStore: this.strategyStore,
         memory: this.memory,
         broker: this.agent.broker,
+        exchange: config.paperTrading ? null : this.agent.exchange,
         sessionId: this.userSessionId,
       });
     } catch {}
@@ -621,7 +632,9 @@ class CryptoDaemon {
 
     let openOrders: any[] = [];
     try {
-      openOrders = await this.agent.exchange.fetchOpenOrders();
+      openOrders = config.paperTrading && this.agent.broker
+        ? await this.agent.broker.fetchOpenOrders(null, this.activeIdentity.bot.id)
+        : await this.agent.exchange.fetchOpenOrders();
     } catch (err: any) {
       this.log(`Pending-order reconciliation skipped (fetchOpenOrders failed): ${err.message ?? err}`);
       return;
@@ -714,7 +727,7 @@ class CryptoDaemon {
   private async seedStrategy(strat: import("./strategy/base.js").Strategy): Promise<void> {
     if (!(strat instanceof SignalStrategy)) return;
     const tf = strat.timeframe;
-    const candles = await this.agent.exchange.fetchOhlcv(strat.symbol, tf, 200);
+    const candles = await this.agent.marketData.fetchOhlcv(strat.symbol, tf, 200);
     const closes = candles.map((c: any) => c.close as number);
     strat.seedHistory(closes);
   }

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { SessionType } from "./session.js";
-import type { StrategyRule, RiskParams, StrategyPersistence } from "./strategy/state.js";
+import type { RiskParams } from "./strategy/state.js";
 import type { StrategySnapshot } from "./strategy/base.js";
 
 export interface SessionRow {
@@ -246,7 +246,6 @@ export class Memory {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.initTables();
-    this.migrate();
   }
 
   private initTables(): void {
@@ -343,13 +342,6 @@ export class Memory {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      CREATE TABLE IF NOT EXISTS strategy_rules (
-        id TEXT PRIMARY KEY,
-        data TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
       CREATE TABLE IF NOT EXISTS risk_params (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         data TEXT NOT NULL,
@@ -357,8 +349,6 @@ export class Memory {
       );
 
       -- A0: Active positions tracked by the OrderExecutor (local SL/TP metadata)
-      -- rule_id is kept as the primary key for backwards compat; it doubles as
-      -- the strategy_id since each position is owned by exactly one strategy.
       CREATE TABLE IF NOT EXISTS active_positions (
         rule_id TEXT PRIMARY KEY,
         strategy_id TEXT,
@@ -388,8 +378,11 @@ export class Memory {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         exchange_order_id TEXT,
         session_id TEXT,
+        strategy_id TEXT,
         bot_id TEXT,
         trading_account_id TEXT,
+        position_id TEXT,
+        action TEXT,
         symbol TEXT NOT NULL,
         side TEXT NOT NULL,
         order_type TEXT NOT NULL,
@@ -415,9 +408,8 @@ export class Memory {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- B1: Polymorphic strategies (replaces strategy_rules). Each row is one
-      -- Strategy instance; kind selects the concrete class, params carries
-      -- the kind-specific config as JSON.
+      -- B1: Polymorphic strategies. Each row is one Strategy instance; kind
+      -- selects the concrete class, params carries kind-specific config as JSON.
       CREATE TABLE IF NOT EXISTS strategies (
         id TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -528,126 +520,6 @@ export class Memory {
     `);
   }
 
-  private migrate(): void {
-    const cols = this.db.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>;
-    const hasSessionId = cols.some((c) => c.name === "session_id");
-    if (!hasSessionId) {
-      const legacyId = randomUUID();
-      this.db.exec(`
-        ALTER TABLE conversations ADD COLUMN session_id TEXT REFERENCES sessions(id);
-      `);
-      this.db
-        .prepare("INSERT INTO sessions (id, name, type) VALUES (?, ?, ?)")
-        .run(legacyId, "legacy", "user");
-      this.db.prepare("UPDATE conversations SET session_id = ?").run(legacyId);
-    }
-
-    this.migrateAddIdentityColumns();
-    this.migrateLegacyRulesToStrategies();
-    this.migrateAddStrategyIdColumn();
-    this.migrateAddPendingOrderStrategyColumns();
-  }
-
-  private ensureColumn(table: string, column: string, type: string): void {
-    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === column)) {
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    }
-  }
-
-  /**
-   * Add identity columns to existing databases. New databases already get
-   * these from CREATE TABLE, but old DBs need an idempotent migration.
-   */
-  private migrateAddIdentityColumns(): void {
-    this.ensureColumn("sessions", "bot_id", "TEXT");
-    this.ensureColumn("trades", "bot_id", "TEXT");
-    this.ensureColumn("trades", "trading_account_id", "TEXT");
-    this.ensureColumn("pending_orders", "bot_id", "TEXT");
-    this.ensureColumn("pending_orders", "trading_account_id", "TEXT");
-    this.ensureColumn("active_positions", "bot_id", "TEXT");
-    this.ensureColumn("active_positions", "trading_account_id", "TEXT");
-    this.ensureColumn("strategies", "bot_id", "TEXT");
-    this.ensureColumn("strategies", "trading_account_id", "TEXT");
-  }
-
-  /**
-   * pending_orders needs strategy_id + position_id so OrderExecutor can
-   * resume the right in-flight order when a limit fill arrives (Grid, Ladder
-   * with limit entries, etc.).
-   */
-  private migrateAddPendingOrderStrategyColumns(): void {
-    const cols = this.db.prepare("PRAGMA table_info(pending_orders)").all() as Array<{ name: string }>;
-    const names = new Set(cols.map((c) => c.name));
-    if (!names.has("strategy_id")) {
-      this.db.exec("ALTER TABLE pending_orders ADD COLUMN strategy_id TEXT");
-    }
-    if (!names.has("position_id")) {
-      this.db.exec("ALTER TABLE pending_orders ADD COLUMN position_id TEXT");
-    }
-    if (!names.has("action")) {
-      // "enter" or "exit" — tells executor which branch to run on fill.
-      this.db.exec("ALTER TABLE pending_orders ADD COLUMN action TEXT");
-    }
-  }
-
-  /**
-   * Add strategy_id columns to legacy trades + active_positions tables so
-   * budget accounting can attribute rows to a Strategy. Safe idempotent.
-   */
-  private migrateAddStrategyIdColumn(): void {
-    this.ensureColumn("trades", "strategy_id", "TEXT");
-    this.ensureColumn("active_positions", "strategy_id", "TEXT");
-  }
-
-  /**
-   * One-shot migration: strategy_rules → strategies as kind='signal'.
-   * Safe to re-run; only imports rows that don't already exist in strategies.
-   */
-  private migrateLegacyRulesToStrategies(): void {
-    const tableExists = this.db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='strategy_rules'")
-      .get();
-    if (!tableExists) return;
-
-    const legacyRows = this.db
-      .prepare("SELECT id, data FROM strategy_rules")
-      .all() as Array<{ id: string; data: string }>;
-    if (!legacyRows.length) return;
-
-    const existsStmt = this.db.prepare("SELECT 1 FROM strategies WHERE id = ?");
-    const insertStmt = this.db.prepare(
-      `INSERT INTO strategies (id, kind, symbol, params, allocated_usdt, enabled, created_at, updated_at)
-       VALUES (?, 'signal', ?, ?, 0, ?, ?, ?)`,
-    );
-
-    for (const row of legacyRows) {
-      if (existsStmt.get(row.id)) continue;
-      try {
-        const rule = JSON.parse(row.data);
-        const params = {
-          timeframe: rule.timeframe ?? "1h",
-          side: rule.side,
-          entry: rule.entry,
-          exit: rule.exit,
-          positionSizeUsdt: rule.positionSizeUsdt,
-          stopLossPct: rule.stopLossPct,
-          takeProfitPct: rule.takeProfitPct,
-        };
-        insertStmt.run(
-          rule.id,
-          rule.symbol,
-          JSON.stringify(params),
-          rule.enabled ? 1 : 0,
-          rule.createdAt,
-          rule.updatedAt,
-        );
-      } catch (e) {
-        console.warn(`[Memory] legacy rule ${row.id} skipped during migration:`, (e as any).message);
-      }
-    }
-  }
-
   private identityKeyPart(value: string): string {
     const key = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
     return key || "default";
@@ -693,21 +565,6 @@ export class Memory {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
-  }
-
-  private backfillDefaultIdentity(botId: string, tradingAccountId: string): void {
-    this.db.prepare("UPDATE sessions SET bot_id = ? WHERE bot_id IS NULL").run(botId);
-    for (const table of ["trades", "pending_orders", "active_positions", "strategies"]) {
-      this.db
-        .prepare(
-          `UPDATE ${table}
-           SET
-             bot_id = COALESCE(bot_id, ?),
-             trading_account_id = COALESCE(trading_account_id, ?)
-           WHERE bot_id IS NULL OR trading_account_id IS NULL`,
-        )
-        .run(botId, tradingAccountId);
-    }
   }
 
   // --- Identity model ---
@@ -764,7 +621,6 @@ export class Memory {
 
     this.defaultBotId = botId;
     this.defaultTradingAccountId = tradingAccountId;
-    this.backfillDefaultIdentity(botId, tradingAccountId);
 
     return {
       fundingAccount: this.getFundingAccount(fundingId)!,
@@ -1039,27 +895,6 @@ export class Memory {
       .run(eventType, data);
   }
 
-  // --- Strategy Persistence (implements StrategyPersistence) ---
-
-  saveRule(rule: StrategyRule): void {
-    this.db
-      .prepare(
-        "INSERT OR REPLACE INTO strategy_rules (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)",
-      )
-      .run(rule.id, JSON.stringify(rule), rule.createdAt, rule.updatedAt);
-  }
-
-  deleteRule(id: string): void {
-    this.db.prepare("DELETE FROM strategy_rules WHERE id = ?").run(id);
-  }
-
-  loadAllRules(): StrategyRule[] {
-    const rows = this.db
-      .prepare("SELECT data FROM strategy_rules ORDER BY created_at")
-      .all() as Array<{ data: string }>;
-    return rows.map((r) => JSON.parse(r.data) as StrategyRule);
-  }
-
   // ── B1: polymorphic strategies persistence ──────────────────────────────
 
   saveStrategy(snap: StrategySnapshot): void {
@@ -1143,7 +978,7 @@ export class Memory {
       )
       .run(
         pos.ruleId,
-        pos.strategyId ?? pos.ruleId, // strategyId defaults to ruleId for legacy callers
+        pos.strategyId ?? pos.ruleId,
         this.botIdOrDefault(pos.botId),
         this.tradingAccountIdOrDefault(pos.tradingAccountId),
         pos.symbol,

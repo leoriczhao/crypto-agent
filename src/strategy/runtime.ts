@@ -6,6 +6,7 @@ import type { Signal } from "./state.js";
 import type { StrategyManager } from "./manager.js";
 import type { OrderExecutor } from "./executor.js";
 import type { BaseExchange } from "../exchange/base.js";
+import type { Broker } from "../broker/types.js";
 
 /**
  * Thin orchestration layer between StrategyManager and the rest of the engine.
@@ -25,14 +26,22 @@ export class StrategyRuntime extends EventEmitter {
   private manager: StrategyManager;
   private memory: Memory | null;
   private exchange: BaseExchange | null;
+  private broker: Broker | null;
   private started = new Set<string>();
 
-  constructor(opts: { feed: MarketFeed; manager: StrategyManager; memory?: Memory; exchange?: BaseExchange }) {
+  constructor(opts: {
+    feed: MarketFeed;
+    manager: StrategyManager;
+    memory?: Memory;
+    exchange?: BaseExchange | null;
+    broker?: Broker | null;
+  }) {
     super();
     this.feed = opts.feed;
     this.manager = opts.manager;
     this.memory = opts.memory ?? null;
     this.exchange = opts.exchange ?? null;
+    this.broker = opts.broker ?? null;
   }
 
   /**
@@ -51,9 +60,10 @@ export class StrategyRuntime extends EventEmitter {
       feed: this.feed,
       emitSignal: (signal: Signal) => this.emit("signal", signal),
       cancelOrder: async (exchangeOrderId, symbol) => {
-        if (!this.exchange) return;
+        if (!this.exchange && !this.broker) return;
         try {
-          await this.exchange.cancelOrder(exchangeOrderId, symbol);
+          if (this.broker) await this.broker.cancelOrder(exchangeOrderId, symbol);
+          else await this.exchange!.cancelOrder(exchangeOrderId, symbol);
         } catch (e: any) {
           this.emit("strategy_error", { strategyId: strategy.id, error: `cancelOrder: ${e.message ?? e}` });
         }
@@ -74,12 +84,13 @@ export class StrategyRuntime extends EventEmitter {
     // Cascade-cancel any open limit orders this strategy left on the book.
     // Without this, a disabled/removed strategy's resting orders keep sitting
     // there and will still fill (silent ghost trades).
-    if (this.memory && this.exchange) {
+    if (this.memory && (this.exchange || this.broker)) {
       const open = this.memory.getOpenPendingOrdersByStrategy(id);
       for (const o of open) {
         if (!o.exchangeOrderId) continue;
         try {
-          await this.exchange.cancelOrder(o.exchangeOrderId, o.symbol);
+          if (this.broker) await this.broker.cancelOrder(o.exchangeOrderId, o.symbol);
+          else await this.exchange!.cancelOrder(o.exchangeOrderId, o.symbol);
           this.memory.updatePendingOrder(o.id, { status: "cancelled" });
         } catch (e: any) {
           this.emit("strategy_error", { strategyId: id, error: `cascade-cancel ${o.exchangeOrderId}: ${e.message ?? e}` });

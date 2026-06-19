@@ -33,7 +33,7 @@ interface GridLevel {
  * Relies on the B3 event loop:
  *   - ctx.emitSignal with orderType='limit' → OrderExecutor places the order
  *     and stores pending_orders, but doesn't build a position yet.
- *   - PaperExchange.processTick (or Live polling) detects the limit cross
+ *   - PaperBroker.markToMarket (or live polling) detects the limit cross
  *     and emits 'orderFilled'.
  *   - OrderExecutor.onExchangeFill finalizes → emits "entered" / "exited".
  *   - Runtime forwards those to Strategy.onOrderFilled here, where we

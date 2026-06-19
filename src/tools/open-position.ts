@@ -16,8 +16,8 @@ registerTool(
     },
     required: ["symbol", "side", "notional_usdt", "leverage"],
   },
-  ["exchange", "broker", "config", "memory", "sessionId"],
-  async ({ exchange, broker, config, memory, sessionId, symbol, side, notional_usdt, leverage, order_type = "market", price }) => {
+  ["market_data", "broker", "config", "memory", "sessionId"],
+  async ({ market_data, broker, config, memory, sessionId, symbol, side, notional_usdt, leverage, order_type = "market", price }) => {
     try {
       if (!config?.paperTrading) return "Error: contract trading is unsupported outside paper mode";
       if (!broker) return "Error: paper broker is not initialized";
@@ -29,7 +29,7 @@ registerTool(
       }
       if (order_type === "limit" && !(price > 0)) return "Error: limit order requires a positive price";
 
-      const mark = order_type === "limit" ? Number(price) : Number((await exchange.fetchTicker(symbol)).last ?? 0);
+      const mark = order_type === "limit" ? Number(price) : Number((await market_data.fetchTicker(symbol)).last ?? 0);
       if (!(mark > 0)) return "Error: unable to price contract order";
       const amount = notional_usdt / mark;
       const ctx = resolveToolTradingContext(memory, sessionId);

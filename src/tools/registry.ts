@@ -6,6 +6,7 @@ export interface ToolDefinition {
 
 export type ToolDep =
   | "exchange"
+  | "market_data"
   | "config"
   | "memory"
   | "sessionId"

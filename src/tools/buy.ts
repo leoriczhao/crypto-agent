@@ -17,11 +17,12 @@ registerTool(
     },
     required: ["symbol", "amount"],
   },
-  ["exchange", "config", "memory", "sessionId", "soul", "strategy_store", "broker"],
-  async ({ exchange, config, memory, sessionId, soul, strategy_store, broker, symbol, amount, order_type = "market", price }) => {
+  ["exchange", "market_data", "config", "memory", "sessionId", "soul", "strategy_store", "broker"],
+  async ({ exchange, market_data, config, memory, sessionId, soul, strategy_store, broker, symbol, amount, order_type = "market", price }) => {
     try {
       if (amount <= 0) return "Error: amount must be > 0";
-      const ticker = await exchange.fetchTicker(symbol);
+      if (config.paperTrading && !broker) return "Error: paper broker is not initialized";
+      const ticker = await market_data.fetchTicker(symbol);
       const cost = ticker.last * amount;
       const riskParams = strategy_store?.riskParams ?? DEFAULT_RISK_PARAMS;
 
@@ -37,6 +38,8 @@ registerTool(
         const guard = await checkTradeAllowed(
           {
             exchange,
+            broker: config.paperTrading ? broker : undefined,
+            botId: resolveToolTradingContext(memory, sessionId).botId,
             riskParams,
             soulMaxPositionPct: soul?.max_position_pct ?? 20,
             maxOrderSizeUsdt: config.maxOrderSizeUsdt,
@@ -63,7 +66,7 @@ registerTool(
         }) ?? null;
 
         const ctx = resolveToolTradingContext(memory, sessionId);
-        const result = config.paperTrading && broker
+        const result = config.paperTrading
           ? await broker.createOrder({
               symbol,
               marketType: "spot",

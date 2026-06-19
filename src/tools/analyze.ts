@@ -12,10 +12,10 @@ registerTool(
     },
     required: [],
   },
-  ["exchange"],
-  async ({ exchange, symbol = "BTC/USDT", timeframe = "1h" }) => {
+  ["market_data"],
+  async ({ market_data, symbol = "BTC/USDT", timeframe = "1h" }) => {
     try {
-      const klines = await exchange.fetchOhlcv(symbol, timeframe, 100);
+      const klines = await market_data.fetchOhlcv(symbol, timeframe, 100);
       const closes: number[] = klines.map((k: any) => (typeof k === "object" ? k.close : k[4]));
 
       if (closes.length < 2) return `Insufficient data for ${symbol} (${closes.length} candles).`;

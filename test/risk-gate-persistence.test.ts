@@ -49,7 +49,12 @@ describe("RiskGate daily PnL persistence", () => {
     const memory1 = new Memory(dbPath);
     const store1 = new StrategyManager(memory1);
     store1.setRiskParams({ ...DEFAULT_RISK_PARAMS, maxDailyLossPct: 3 });
-    const gate1 = new RiskGate(store1, makeExchange(), 10000, memory1);
+    const gate1 = new RiskGate({
+      store: store1,
+      exchange: makeExchange(),
+      initialPortfolioValue: 10000,
+      memory: memory1,
+    });
 
     // 3.5% loss on a $10k baseline = $350 loss, exceeds 3% cap
     gate1.recordPnl(-200);
@@ -59,7 +64,12 @@ describe("RiskGate daily PnL persistence", () => {
     // --- "Daemon restart": new Memory, new RiskGate ---
     const memory2 = new Memory(dbPath);
     const store2 = new StrategyManager(memory2);
-    const gate2 = new RiskGate(store2, makeExchange(), 10000, memory2);
+    const gate2 = new RiskGate({
+      store: store2,
+      exchange: makeExchange(),
+      initialPortfolioValue: 10000,
+      memory: memory2,
+    });
 
     // Next evaluate should respect the accumulated loss and reject
     const decision = await gate2.evaluate(makeSignal());
@@ -86,7 +96,12 @@ describe("RiskGate daily PnL persistence", () => {
     } as any;
     // initialPortfolioValue argument of 10000 would give 0 drawdown; the
     // persisted peak of 15000 should take precedence.
-    const gate = new RiskGate(store, exchange, 10000, memory2);
+    const gate = new RiskGate({
+      store,
+      exchange,
+      initialPortfolioValue: 10000,
+      memory: memory2,
+    });
 
     const decision = await gate.evaluate(makeSignal());
     expect(decision.approved).toBe(false);

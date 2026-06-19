@@ -21,24 +21,26 @@ describe("buy/sell concurrent serialization", () => {
     const { config } = await import("../src/config.js");
 
     const events: string[] = [];
-    const exchange = {
+    const marketData = {
       fetchTicker: vi.fn().mockResolvedValue({ last: 50000 }),
+    };
+    const broker = {
       fetchBalance: vi.fn().mockImplementation(async () => {
         events.push("balance");
         return { USDT: { free: 10000, total: 10000 } };
       }),
       fetchPositions: vi.fn().mockResolvedValue({}),
-      createOrder: vi.fn().mockImplementation(async (sym: string, side: string, _type: string, amount: number) => {
-        events.push(`order:${sym}:${side}:${amount}`);
+      createOrder: vi.fn().mockImplementation(async (order: any) => {
+        events.push(`order:${order.symbol}:${order.side}:${order.amount}`);
         // Simulate latency so interleaving is obvious if the lock is broken
         await new Promise((r) => setTimeout(r, 15));
-        return { id: `mock-${events.length}`, status: "filled", price: 50000, amount };
+        return { id: `mock-${events.length}`, status: "filled", price: 50000, amount: order.amount };
       }),
     };
 
     await Promise.all([
-      TOOL_HANDLERS.buy({ exchange, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
-      TOOL_HANDLERS.buy({ exchange, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "ETH/USDT", amount: 0.01 }),
+      TOOL_HANDLERS.buy({ exchange: null, market_data: marketData, broker, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
+      TOOL_HANDLERS.buy({ exchange: null, market_data: marketData, broker, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "ETH/USDT", amount: 0.01 }),
     ]);
 
     // Expected strict order: balance→order (first), then balance→order (second).
@@ -62,8 +64,10 @@ describe("buy/sell concurrent serialization", () => {
     let activeOperations = 0;
     let maxConcurrent = 0;
 
-    const exchange = {
+    const marketData = {
       fetchTicker: vi.fn().mockResolvedValue({ last: 50000 }),
+    };
+    const broker = {
       fetchBalance: vi.fn().mockResolvedValue({ USDT: { free: 10000, total: 10000 } }),
       fetchPositions: vi.fn().mockResolvedValue({
         "BTC/USDT:long": { amount: 0.001, current_price: 50000, avg_entry_price: 50000 },
@@ -78,9 +82,9 @@ describe("buy/sell concurrent serialization", () => {
     };
 
     await Promise.all([
-      TOOL_HANDLERS.buy({ exchange, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
-      TOOL_HANDLERS.sell({ exchange, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
-      TOOL_HANDLERS.buy({ exchange, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
+      TOOL_HANDLERS.buy({ exchange: null, market_data: marketData, broker, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
+      TOOL_HANDLERS.sell({ exchange: null, market_data: marketData, broker, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
+      TOOL_HANDLERS.buy({ exchange: null, market_data: marketData, broker, config, memory: null, sessionId: null, soul: defaultSoul, strategy_store: null, symbol: "BTC/USDT", amount: 0.001 }),
     ]);
 
     // With the lock, at most one createOrder should run at any instant

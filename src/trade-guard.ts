@@ -1,8 +1,11 @@
 import type { BaseExchange } from "./exchange/base.js";
+import type { Broker } from "./broker/types.js";
 import type { RiskParams } from "./strategy/state.js";
 
 export interface TradeGuardContext {
-  exchange: BaseExchange;
+  exchange?: BaseExchange | null;
+  broker?: Broker | null;
+  botId?: string;
   riskParams: RiskParams;
   /** Soul's max_position_pct — acts as a hard ceiling on riskParams.maxPositionPct */
   soulMaxPositionPct: number;
@@ -61,8 +64,15 @@ export async function checkTradeAllowed(
   let balance: Record<string, any>;
   let positions: Record<string, any>;
   try {
-    balance = await ctx.exchange.fetchBalance();
-    positions = await ctx.exchange.fetchPositions();
+    if (ctx.broker) {
+      balance = await ctx.broker.fetchBalance(ctx.botId);
+      positions = await ctx.broker.fetchPositions(ctx.botId);
+    } else if (ctx.exchange) {
+      balance = await ctx.exchange.fetchBalance();
+      positions = await ctx.exchange.fetchPositions();
+    } else {
+      return reject("Risk check failed: no account source");
+    }
   } catch (err: any) {
     return reject(`Risk check failed: ${err.message ?? err}`);
   }

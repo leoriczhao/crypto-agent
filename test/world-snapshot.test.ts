@@ -11,7 +11,7 @@ function makeMockExchange(overrides: Record<string, any> = {}) {
 
 describe("buildWorldSnapshot", () => {
   test("includes mode and balance", async () => {
-    const result = await buildWorldSnapshot(makeMockExchange(), { paperTrading: true });
+    const result = await buildWorldSnapshot({ paperTrading: true, exchange: makeMockExchange() });
     expect(result).toContain("PAPER");
     expect(result).toContain("$10,000.00");
     expect(result).toContain("$8,000.00");
@@ -28,12 +28,14 @@ describe("buildWorldSnapshot", () => {
       }),
     };
     const broker = {
+      fetchBalance: vi.fn().mockResolvedValue({ USDT: { free: 1500, used: 500, total: 2000 } }),
+      fetchPositions: vi.fn().mockResolvedValue({}),
       fetchOpenOrders: vi.fn().mockResolvedValue([
         { id: "o1", symbol: "BTC/USDT", side: "buy", amount: 0.01 },
       ]),
     };
 
-    const result = await buildWorldSnapshot(makeMockExchange(), {
+    const result = await buildWorldSnapshot({
       paperTrading: true,
       memory: memory as any,
       broker: broker as any,
@@ -47,12 +49,12 @@ describe("buildWorldSnapshot", () => {
   });
 
   test("shows LIVE mode", async () => {
-    const result = await buildWorldSnapshot(makeMockExchange(), { paperTrading: false });
+    const result = await buildWorldSnapshot({ paperTrading: false, exchange: makeMockExchange() });
     expect(result).toContain("LIVE");
   });
 
   test("shows no positions when empty", async () => {
-    const result = await buildWorldSnapshot(makeMockExchange(), { paperTrading: true });
+    const result = await buildWorldSnapshot({ paperTrading: false, exchange: makeMockExchange() });
     expect(result).toContain("Positions: none");
   });
 
@@ -62,7 +64,7 @@ describe("buildWorldSnapshot", () => {
         "BTC/USDT:long": { amount: 0.1, avg_entry_price: 50000, current_price: 55000 },
       }),
     });
-    const result = await buildWorldSnapshot(exchange, { paperTrading: true });
+    const result = await buildWorldSnapshot({ paperTrading: false, exchange });
     expect(result).toContain("BTC/USDT:long");
     expect(result).toContain("+10.0%");
     expect(result).toContain("Positions (1)");
@@ -75,9 +77,10 @@ describe("buildWorldSnapshot", () => {
         { symbol: "ETH/USDT" },
       ]),
     } as any;
-    const result = await buildWorldSnapshot(makeMockExchange(), {
+    const result = await buildWorldSnapshot({
       paperTrading: true,
       strategyStore: store,
+      exchange: makeMockExchange(),
     });
     expect(result).toContain("Active strategies: 2");
     expect(result).toContain("BTC/USDT");
@@ -87,13 +90,13 @@ describe("buildWorldSnapshot", () => {
     const exchange = makeMockExchange({
       fetchBalance: vi.fn().mockRejectedValue(new Error("timeout")),
     });
-    const result = await buildWorldSnapshot(exchange, { paperTrading: true });
+    const result = await buildWorldSnapshot({ paperTrading: true, exchange });
     expect(result).toContain("Snapshot error");
     expect(result).toContain("timeout");
   });
 
   test("omits rules section when no strategy store", async () => {
-    const result = await buildWorldSnapshot(makeMockExchange(), { paperTrading: true });
+    const result = await buildWorldSnapshot({ paperTrading: true, exchange: makeMockExchange() });
     expect(result).not.toContain("Active rules");
   });
 });

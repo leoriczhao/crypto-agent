@@ -25,7 +25,6 @@ export interface MarketOrderBook {
 
 export interface MarketDataProvider {
   readonly exchangeId: string;
-  readonly ccxtInstance?: unknown;
   fetchTicker(symbol: string): Promise<MarketTicker>;
   fetchOhlcv(symbol: string, timeframe?: string, limit?: number): Promise<MarketCandle[]>;
   fetchOrderBook(symbol: string, limit?: number): Promise<MarketOrderBook>;

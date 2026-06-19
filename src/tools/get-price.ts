@@ -10,10 +10,10 @@ registerTool(
     },
     required: ["symbol"],
   },
-  ["exchange"],
-  async ({ exchange, symbol }) => {
+  ["market_data"],
+  async ({ market_data, symbol }) => {
     try {
-      const data = await exchange.fetchTicker(symbol);
+      const data = await market_data.fetchTicker(symbol);
       return JSON.stringify(data, null, 2);
     } catch (e: any) {
       return `Error: ${e.message ?? e}`;

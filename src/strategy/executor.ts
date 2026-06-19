@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { BaseExchange } from "../exchange/base.js";
+import type { Broker, BrokerOrderResult } from "../broker/types.js";
 import type { MarketFeed, Tick } from "../market-feed.js";
+import type { MarketDataProvider } from "../market-data/types.js";
 import type { Memory } from "../memory.js";
 import type { Signal } from "./state.js";
 import type { StrategyManager } from "./manager.js";
@@ -8,8 +10,7 @@ import type { RiskGate, RiskDecision } from "./risk-gate.js";
 import { withTradeLock } from "../trade-lock.js";
 
 interface ActivePosition {
-  /** Unique id for this position leg (positionId in Signal, doubles as the
-   * rule_id primary key in active_positions table for backwards compat). */
+  /** Unique id for this position leg (positionId in Signal). */
   ruleId: string;
   /** Owning strategy id — lets a strategy hold multiple positions. */
   strategyId: string;
@@ -23,39 +24,92 @@ interface ActivePosition {
 }
 
 export class OrderExecutor extends EventEmitter {
-  private exchange: BaseExchange;
+  private exchange: BaseExchange | null;
+  private broker: Broker | null;
+  private marketData: MarketDataProvider;
   private feed: MarketFeed;
   private riskGate: RiskGate;
   private store: StrategyManager;
   private memory: Memory | null;
   private positions = new Map<string, ActivePosition>();
   private paperMode: boolean;
+  private botId: string | null;
+  private tradingAccountId: string | null;
   /** In-memory cache of signals for outstanding limit orders, keyed by
    * exchange order id. On async fill we use this to carry context that
    * pending_orders doesn't persist (e.g. takeProfitPct / stopLossPct). */
   private pendingSignals = new Map<string, { signal: Signal; amount: number }>();
 
   constructor(opts: {
-    exchange: BaseExchange;
+    marketData: MarketDataProvider;
     feed: MarketFeed;
     riskGate: RiskGate;
     store: StrategyManager;
     memory?: Memory;
     paperMode?: boolean;
+    exchange?: BaseExchange | null;
+    broker?: Broker | null;
+    botId?: string | null;
+    tradingAccountId?: string | null;
   }) {
     super();
-    this.exchange = opts.exchange;
+    this.exchange = opts.exchange ?? null;
+    this.broker = opts.broker ?? null;
+    this.marketData = opts.marketData;
     this.feed = opts.feed;
     this.riskGate = opts.riskGate;
     this.store = opts.store;
     this.memory = opts.memory ?? null;
     this.paperMode = opts.paperMode ?? true;
+    this.botId = opts.botId ?? null;
+    this.tradingAccountId = opts.tradingAccountId ?? null;
   }
 
   start(symbols: string[]): void {
     for (const sym of symbols) {
       this.feed.subscribeTicker(sym, (tick) => this.monitorStopTakeProfit(tick));
     }
+  }
+
+  private async fetchPositions(): Promise<Record<string, any>> {
+    if (this.broker) return this.broker.fetchPositions(this.botId ?? undefined);
+    if (this.exchange) return this.exchange.fetchPositions();
+    throw new Error("No execution account source configured");
+  }
+
+  private async cancelOrder(orderId: string, symbol: string): Promise<Record<string, any>> {
+    if (this.broker) return this.broker.cancelOrder(orderId, symbol);
+    if (this.exchange) return this.exchange.cancelOrder(orderId, symbol);
+    throw new Error("No execution account source configured");
+  }
+
+  private async createOrder(
+    signal: Signal,
+    symbol: string,
+    side: "buy" | "sell",
+    orderType: "market" | "limit",
+    amount: number,
+    price?: number | null,
+  ): Promise<Record<string, any> | BrokerOrderResult> {
+    if (this.broker) {
+      if (!this.botId || !this.tradingAccountId) {
+        return { error: "Broker execution requires botId and tradingAccountId" };
+      }
+      return this.broker.createOrder({
+        symbol,
+        marketType: "spot",
+        side,
+        orderType,
+        amount,
+        price: orderType === "limit" ? price ?? null : null,
+        actorType: "strategy",
+        actorId: signal.ruleId,
+        botId: this.botId,
+        tradingAccountId: this.tradingAccountId,
+      });
+    }
+    if (!this.exchange) return { error: "No live exchange configured" };
+    return this.exchange.createOrder(symbol, side, orderType, amount, price);
   }
 
   /**
@@ -77,7 +131,7 @@ export class OrderExecutor extends EventEmitter {
     const local = this.memory.loadActivePositions();
     let exchangePositions: Record<string, any> = {};
     try {
-      exchangePositions = await this.exchange.fetchPositions();
+      exchangePositions = await this.fetchPositions();
     } catch {
       // No exchange connectivity — treat everything as unknown; don't drop records.
       for (const p of local) {
@@ -107,7 +161,7 @@ export class OrderExecutor extends EventEmitter {
       if (exAmount > 0) {
         this.positions.set(p.ruleId, {
           ruleId: p.ruleId,
-          strategyId: p.strategyId ?? p.ruleId, // legacy rows default to ruleId
+          strategyId: p.strategyId ?? p.ruleId,
           symbol: p.symbol,
           side: p.side,
           entryPrice: p.entryPrice,
@@ -167,13 +221,13 @@ export class OrderExecutor extends EventEmitter {
 
   private async enterMarket(signal: Signal): Promise<void> {
     try {
-      const ticker = await this.exchange.fetchTicker(signal.symbol);
+      const ticker = await this.marketData.fetchTicker(signal.symbol);
       const price = ticker.last ?? 0;
       if (price <= 0) return;
 
       const amount = signal.sizeUsdt / price;
       const orderSide = signal.side === "long" ? "buy" : "sell";
-      const result = await this.exchange.createOrder(signal.symbol, orderSide, "market", amount);
+      const result = await this.createOrder(signal, signal.symbol, orderSide, "market", amount);
 
       if (result.error) {
         this.emit("error", { signal, error: result.error });
@@ -194,12 +248,12 @@ export class OrderExecutor extends EventEmitter {
 
     try {
       const orderSide = pos.side === "long" ? "sell" : "buy";
-      const result = await this.exchange.createOrder(pos.symbol, orderSide, "market", pos.amount);
+      const result = await this.createOrder(signal, pos.symbol, orderSide, "market", pos.amount);
       if (result.error) {
         this.emit("error", { signal, error: result.error });
         return;
       }
-      const exitPrice = result.price ?? (await this.exchange.fetchTicker(pos.symbol)).last ?? 0;
+      const exitPrice = result.price ?? (await this.marketData.fetchTicker(pos.symbol)).last ?? 0;
       this.finalizeExited(signal, pos, exitPrice, result);
     } catch (err: any) {
       this.emit("error", { signal, error: err.message ?? err });
@@ -216,7 +270,8 @@ export class OrderExecutor extends EventEmitter {
     try {
       const amount = signal.sizeUsdt / signal.limitPrice;
       const orderSide = signal.side === "long" ? "buy" : "sell";
-      const result = await this.exchange.createOrder(
+      const result = await this.createOrder(
+        signal,
         signal.symbol,
         orderSide,
         "limit",
@@ -257,7 +312,8 @@ export class OrderExecutor extends EventEmitter {
     if (!pos) return;
     try {
       const orderSide = pos.side === "long" ? "sell" : "buy";
-      const result = await this.exchange.createOrder(
+      const result = await this.createOrder(
+        signal,
         pos.symbol,
         orderSide,
         "limit",

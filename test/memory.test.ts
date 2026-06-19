@@ -220,7 +220,7 @@ describe("Memory", () => {
     expect(trades[0].tradingAccountId).toBe(identity.tradingAccount.id);
   });
 
-  test("identity seed backfills legacy sessions and trades without identity", () => {
+  test("identity seed does not backfill pre-existing unbound sessions or trades", () => {
     mem = new Memory(makeTempDb());
     mem.createSession("s1", "user", "user");
     mem.logTrade("s1", {
@@ -230,18 +230,15 @@ describe("Memory", () => {
       price: 65000,
     });
 
-    const identity = mem.ensureDefaultIdentity({
+    mem.ensureDefaultIdentity({
       exchangeId: "okx",
       mode: "PAPER",
       name: "default",
     });
 
-    expect(mem.getSessionBinding("s1")).toMatchObject({
-      botId: identity.bot.id,
-      tradingAccountId: identity.tradingAccount.id,
-    });
+    expect(mem.getSessionBinding("s1")).toBeNull();
     const trades = mem.getRecentTrades(1);
-    expect(trades[0].botId).toBe(identity.bot.id);
-    expect(trades[0].tradingAccountId).toBe(identity.tradingAccount.id);
+    expect(trades[0].botId).toBeNull();
+    expect(trades[0].tradingAccountId).toBeNull();
   });
 });

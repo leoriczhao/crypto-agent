@@ -260,7 +260,7 @@ describe("B1 — strategy identity", () => {
     expect(loaded[0].tradingAccountId).toBe(identity.tradingAccount.id);
   });
 
-  test("identity seed backfills legacy strategy, position, and pending order rows", () => {
+  test("identity seed does not backfill pre-existing strategy, position, or pending order rows", () => {
     memory.saveStrategy({
       id: "strategy-1",
       kind: "signal",
@@ -293,18 +293,18 @@ describe("B1 — strategy identity", () => {
       amount: 0.01,
     });
 
-    const identity = memory.ensureDefaultIdentity({
+    memory.ensureDefaultIdentity({
       exchangeId: "okx",
       mode: "PAPER",
       name: "default",
     });
 
-    expect(memory.loadAllStrategies()[0].botId).toBe(identity.bot.id);
-    expect(memory.loadAllStrategies()[0].tradingAccountId).toBe(identity.tradingAccount.id);
-    expect(memory.loadActivePositions()[0].botId).toBe(identity.bot.id);
-    expect(memory.loadActivePositions()[0].tradingAccountId).toBe(identity.tradingAccount.id);
-    expect(memory.loadOpenPendingOrders()[0].botId).toBe(identity.bot.id);
-    expect(memory.loadOpenPendingOrders()[0].tradingAccountId).toBe(identity.tradingAccount.id);
+    expect(memory.loadAllStrategies()[0].botId).toBeNull();
+    expect(memory.loadAllStrategies()[0].tradingAccountId).toBeNull();
+    expect(memory.loadActivePositions()[0].botId).toBeNull();
+    expect(memory.loadActivePositions()[0].tradingAccountId).toBeNull();
+    expect(memory.loadOpenPendingOrders()[0].botId).toBeNull();
+    expect(memory.loadOpenPendingOrders()[0].tradingAccountId).toBeNull();
   });
 });
 

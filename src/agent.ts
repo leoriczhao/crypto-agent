@@ -1,13 +1,12 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
-import { PaperExchange } from "./exchange/paper.js";
 import { LiveExchange } from "./exchange/live.js";
 import { ExchangeManager } from "./exchange/manager.js";
 import { CcxtMarketDataProvider } from "./market-data/ccxt-provider.js";
 import { PaperBroker } from "./broker/paper-broker.js";
-import { BrokerExchangeAdapter } from "./broker/exchange-adapter.js";
 import type { Broker } from "./broker/types.js";
+import type { MarketDataProvider } from "./market-data/types.js";
 import { TOOL_DEFINITIONS } from "./tools/registry.js";
 import { Soul } from "./soul.js";
 import { SkillLoader } from "./skill-loader.js";
@@ -58,22 +57,28 @@ export class CryptoAgent {
   memory: Memory | null = null;
   strategyStore: StrategyManager | null = null;
   broker: Broker | null = null;
+  marketData: MarketDataProvider;
   provider: string;
   client: any;
   private langGraphRuntime = createAgentGraphRuntime();
 
   constructor() {
     this.exchangeManager = new ExchangeManager();
-    const defaultEx = config.paperTrading
-      ? new PaperExchange(config.defaultExchange, config.initialBalance, config.httpsProxy)
-      : new LiveExchange(config.defaultExchange, config.exchangeApiKey, config.exchangeSecret, config.exchangePassword, config.httpsProxy);
-    this.exchangeManager.register(config.defaultExchange, defaultEx);
+    this.marketData = new CcxtMarketDataProvider(config.defaultExchange, config.httpsProxy);
+    if (!config.paperTrading) {
+      const defaultEx = new LiveExchange(
+        config.defaultExchange,
+        config.exchangeApiKey,
+        config.exchangeSecret,
+        config.exchangePassword,
+        config.httpsProxy,
+      );
+      this.exchangeManager.register(config.defaultExchange, defaultEx);
 
-    for (const [exId, creds] of Object.entries(config.extraExchanges)) {
-      const ex = config.paperTrading
-        ? new PaperExchange(exId, config.initialBalance, config.httpsProxy)
-        : new LiveExchange(exId, creds.api_key ?? "", creds.secret ?? "", "", config.httpsProxy);
-      this.exchangeManager.register(exId, ex);
+      for (const [exId, creds] of Object.entries(config.extraExchanges)) {
+        const ex = new LiveExchange(exId, creds.api_key ?? "", creds.secret ?? "", "", config.httpsProxy);
+        this.exchangeManager.register(exId, ex);
+      }
     }
 
     this.soul = new Soul(config.tradingSoul);
@@ -109,6 +114,9 @@ export class CryptoAgent {
   }
 
   get exchange() {
+    if (config.paperTrading) {
+      throw new Error("Paper mode has no exchange facade; use marketData and broker directly.");
+    }
     return this.exchangeManager.active;
   }
 
@@ -119,26 +127,20 @@ export class CryptoAgent {
     httpsProxy?: string;
   }): void {
     const exchangeId = opts.identity.tradingAccount.exchangeId || config.defaultExchange;
+    if (this.marketData.exchangeId !== exchangeId) {
+      this.marketData = new CcxtMarketDataProvider(exchangeId, opts.httpsProxy ?? "");
+    }
     opts.memory.ensureBotAllocation({
       botId: opts.identity.bot.id,
       tradingAccountId: opts.identity.tradingAccount.id,
       asset: "USDT",
       amount: opts.initialBalance.USDT ?? 10000,
     });
-    const marketData = new CcxtMarketDataProvider(exchangeId, opts.httpsProxy ?? "");
-    const broker = new PaperBroker({
+    this.broker = new PaperBroker({
       memory: opts.memory,
-      marketData,
+      marketData: this.marketData,
       tradingAccountId: opts.identity.tradingAccount.id,
     });
-    this.broker = broker;
-    this.exchangeManager.register(exchangeId, new BrokerExchangeAdapter({
-      marketData,
-      broker,
-      botId: opts.identity.bot.id,
-      tradingAccountId: opts.identity.tradingAccount.id,
-    }));
-    this.exchangeManager.setActive(exchangeId);
   }
 
   get systemPrompt(): string {
@@ -148,7 +150,8 @@ export class CryptoAgent {
 
   private createToolDeps(sessionId: string): AgentToolDeps {
     return {
-      getExchange: () => this.exchange,
+      getExchange: () => config.paperTrading ? null : this.exchange,
+      getMarketData: () => this.marketData,
       getConfig: () => config,
       getMemory: () => this.memory,
       getSessionId: () => sessionId,
@@ -165,11 +168,12 @@ export class CryptoAgent {
     let prompt = this.systemPrompt;
     if (config.worldSnapshotEnabled) {
       try {
-        const snapshot = await buildWorldSnapshot(this.exchange, {
+        const snapshot = await buildWorldSnapshot({
           paperTrading: config.paperTrading,
           strategyStore: this.strategyStore,
           memory: this.memory,
           broker: this.broker,
+          exchange: config.paperTrading ? null : this.exchange,
           sessionId,
         });
         prompt += `\n\n## Current State\n${snapshot}`;
@@ -224,5 +228,6 @@ export class CryptoAgent {
 
   async close(): Promise<void> {
     await this.exchangeManager.closeAll();
+    await this.marketData.close?.();
   }
 }

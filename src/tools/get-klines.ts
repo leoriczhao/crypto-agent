@@ -12,10 +12,10 @@ registerTool(
     },
     required: ["symbol"],
   },
-  ["exchange"],
-  async ({ exchange, symbol, timeframe = "1h", limit = 24 }) => {
+  ["market_data"],
+  async ({ market_data, symbol, timeframe = "1h", limit = 24 }) => {
     try {
-      const data = await exchange.fetchOhlcv(symbol, timeframe, limit);
+      const data = await market_data.fetchOhlcv(symbol, timeframe, limit);
       return JSON.stringify(data.slice(-limit), null, 2);
     } catch (e: any) {
       return `Error: ${e.message ?? e}`;

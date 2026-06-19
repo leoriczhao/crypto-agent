@@ -15,12 +15,12 @@ function formatUsd(value: number): string {
  * Target: ~200 tokens.
  */
 export async function buildWorldSnapshot(
-  exchange: BaseExchange,
   opts: {
     paperTrading: boolean;
     strategyStore?: StrategyManager | null;
     memory?: Memory | null;
     broker?: Broker | null;
+    exchange?: BaseExchange | null;
     sessionId?: string | null;
   },
 ): Promise<string> {
@@ -28,7 +28,9 @@ export async function buildWorldSnapshot(
 
   try {
     const ctx = opts.memory ? resolveToolTradingContext(opts.memory, opts.sessionId) : null;
-    const balance = await exchange.fetchBalance();
+    const balance = opts.broker && ctx
+      ? await opts.broker.fetchBalance(ctx.botId)
+      : await opts.exchange?.fetchBalance() ?? {};
     const usdtFree = balance.USDT?.free ?? 0;
     const usdtTotal = balance.USDT?.total ?? usdtFree;
     lines.push(`Mode: ${opts.paperTrading ? "PAPER" : "LIVE"}`);
@@ -43,7 +45,9 @@ export async function buildWorldSnapshot(
       }
     }
 
-    const positions = await exchange.fetchPositions();
+    const positions = opts.broker && ctx
+      ? await opts.broker.fetchPositions(ctx.botId)
+      : await opts.exchange?.fetchPositions() ?? {};
     const posEntries = Object.entries(positions).filter(
       ([, pos]: [string, any]) => Math.abs(pos.amount ?? 0) > 0,
     );
@@ -65,8 +69,8 @@ export async function buildWorldSnapshot(
 
     const openOrders = opts.broker && ctx
       ? await opts.broker.fetchOpenOrders(null, ctx.botId)
-      : typeof exchange.fetchOpenOrders === "function"
-        ? await exchange.fetchOpenOrders()
+      : typeof opts.exchange?.fetchOpenOrders === "function"
+        ? await opts.exchange.fetchOpenOrders()
         : [];
     if (ctx || openOrders.length) lines.push(`Open orders: ${openOrders.length}`);
   } catch (err: any) {

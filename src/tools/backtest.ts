@@ -43,12 +43,12 @@ registerTool(
     },
     required: [],
   },
-  ["exchange"],
-  async ({ exchange, strategy, symbol = "BTC/USDT", timeframe = "1h", limit = 200, params, entry_conditions, exit_conditions, side = "long" }) => {
+  ["market_data"],
+  async ({ market_data, strategy, symbol = "BTC/USDT", timeframe = "1h", limit = 200, params, entry_conditions, exit_conditions, side = "long" }) => {
     const { BacktestEngine } = await import("../backtest.js");
     try {
       limit = Math.min(limit, 500);
-      const ohlcv = await exchange.fetchOhlcv(symbol, timeframe, limit);
+      const ohlcv = await market_data.fetchOhlcv(symbol, timeframe, limit);
       if (ohlcv.length < 30) return `Insufficient data: got ${ohlcv.length} candles, need at least 30.`;
 
       const engine = new BacktestEngine(10000);

@@ -1,17 +1,24 @@
 import { registerTool } from "./registry.js";
+import { resolveToolTradingContext } from "./trading-context.js";
 
 registerTool(
   "assess_risk",
   "Assess portfolio risk: exposure, concentration, drawdown, and current risk limits.",
   { type: "object", properties: {} },
-  ["exchange", "config"],
-  async ({ exchange, config }) => {
+  ["exchange", "broker", "memory", "sessionId", "config"],
+  async ({ exchange, broker, memory, sessionId, config }) => {
     try {
-      const balance = await exchange.fetchBalance();
+      if (config.paperTrading && !broker) return "Error in assess_risk: paper broker is not initialized";
+      const ctx = resolveToolTradingContext(memory, sessionId);
+      const balance = config.paperTrading
+        ? await broker.fetchBalance(ctx.botId)
+        : await exchange.fetchBalance();
       const usdtFree = balance.USDT?.total ?? 0;
       const initialUsdt = config.initialBalance.USDT ?? 10000;
 
-      const positions: Record<string, any> = await exchange.fetchPositions();
+      const positions: Record<string, any> = config.paperTrading
+        ? await broker.fetchPositions(ctx.botId)
+        : await exchange.fetchPositions();
 
       let totalExposure = 0;
       let largestPosition = 0;

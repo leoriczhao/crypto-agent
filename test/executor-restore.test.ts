@@ -36,6 +36,12 @@ function makeExec(overrides: { fetchPositions?: any } = {}) {
     createOrder: vi.fn(),
     fetchOpenOrders: vi.fn().mockResolvedValue([]),
   } as any;
+  const marketData = {
+    exchangeId: "okx",
+    fetchTicker: vi.fn().mockResolvedValue({ symbol: "BTC/USDT", last: 50000, timestamp: Date.now() }),
+    fetchOhlcv: vi.fn(),
+    fetchOrderBook: vi.fn(),
+  };
   const feed = new EventEmitter() as any;
   feed.subscribeTicker = vi.fn();
   feed.unsubscribe = vi.fn();
@@ -44,7 +50,7 @@ function makeExec(overrides: { fetchPositions?: any } = {}) {
     evaluate: vi.fn(),
     recordPnl: vi.fn(),
   } as any;
-  const executor = new OrderExecutor({ exchange, feed, riskGate, store, memory, paperMode: true });
+  const executor = new OrderExecutor({ marketData, exchange, feed, riskGate, store, memory, paperMode: false });
   return { executor, exchange, feed, store };
 }
 

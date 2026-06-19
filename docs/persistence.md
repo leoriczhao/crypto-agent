@@ -30,7 +30,6 @@ API) is explicitly NOT persisted.
 | `session_summaries` | Compacted context summaries | `memory.ts` |
 | `cron_jobs` | Recurring LLM tasks | `memory.ts` |
 | `events` | Generic event log | `memory.ts` |
-| `strategy_rules` | Legacy rule entries, migrated into `strategies` | `memory.ts` |
 | `risk_params` | StrategyManager risk parameters | `memory.ts` |
 | `active_positions` (A0) | Fast-path positions + SL/TP + bot/account attribution | `memory.ts` / `executor.ts` |
 | `daily_pnl` (A1) | Realized PnL per day | `memory.ts` / `risk-gate.ts` |
@@ -51,15 +50,17 @@ API) is explicitly NOT persisted.
    `active_soul` / `active_exchange` / `active_user_session_id` from the
    `daemon_state` KV.
 3. `ensureDefaultIdentity()` creates or refreshes the default funding account,
-   trading account, and bot for the active exchange/mode, then backfills legacy
-   rows whose bot/account columns are still NULL.
+   trading account, and bot for the active exchange/mode. It does not backfill
+   pre-existing unbound rows; callers must create sessions, strategies, orders,
+   and trades in the active identity context.
 4. In paper mode, `CryptoAgent.configurePaperBroker()` seeds the active bot's
-   USDT allocation if missing and replaces the daemon exchange with
-   `BrokerExchangeAdapter(PaperBroker + CcxtMarketDataProvider)`. Market data is
-   public CCXT data; orders never leave the local SQLite-backed paper broker.
+   USDT allocation if missing and creates a direct `PaperBroker` over public
+   `CcxtMarketDataProvider` data. Orders never leave the local SQLite-backed
+   paper broker.
 5. `StrategyManager.loadFromDb()` restores strategies + risk params.
 6. `startFastPath()` → `OrderExecutor.restore()` loads `active_positions`
-   and cross-checks with `exchange.fetchPositions()`:
+   and cross-checks with `broker.fetchPositions()` in paper mode or
+   `exchange.fetchPositions()` in live mode:
    - **Match** → restore SL/TP into in-memory map.
    - **Local record, no exchange position** → drop (stale).
    - **Exchange position, no local record** → report as orphan; operator
@@ -67,7 +68,8 @@ API) is explicitly NOT persisted.
    - **Exchange unreachable** → keep local records; retry on the next
      evaluate.
 7. `reconcilePendingOrders()` loads `status='open'` orders and compares
-   against `exchange.fetchOpenOrders()`. Missing IDs → mark `filled`.
+   against `broker.fetchOpenOrders()` in paper mode or `exchange.fetchOpenOrders()`
+   in live mode. Missing IDs → mark `filled`.
 8. `HeartbeatScheduler.start()`.
 9. `cronLoop()` begins.
 
@@ -127,8 +129,8 @@ single-value state can be added without schema migrations.
 
 ### B1 — Polymorphic strategies
 The `strategies` table stores `kind + params` snapshots for `signal`,
-`ladder`, and `grid` strategies. Legacy `strategy_rules` rows are imported as
-`kind='signal'` during migration so old rules continue to execute.
+`ladder`, and `grid` strategies. There is no legacy `strategy_rules` import path
+in the current schema.
 
 ### B2 — Per-strategy budget isolation
 Strategy allocation lives on the `strategies` row. Runtime accounting combines
@@ -146,9 +148,8 @@ Paper mode now separates public market data from execution/accounting:
 - `CcxtMarketDataProvider` reads public ticker/OHLCV/orderbook data and does not
   require exchange trading credentials.
 - `PaperBroker` owns local orders, balances, positions, fills, margin, and PnL.
-- `BrokerExchangeAdapter` implements the existing `BaseExchange` surface so
-  `buy`, `sell`, `RiskGate`, `OrderExecutor`, and existing strategies can keep
-  calling the same methods while the backing state is now SQLite-backed.
+- `buy`, `sell`, `RiskGate`, `OrderExecutor`, and paper order reconciliation call
+  `PaperBroker` directly; market observation uses `MarketDataProvider`.
 
 The first contract model is intentionally narrow: USDT linear isolated-margin
 paper contracts only. Funding fees, exchange liquidation, and live contract

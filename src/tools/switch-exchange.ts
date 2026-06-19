@@ -13,6 +13,9 @@ registerTool(
   ["exchange_manager", "memory", "config"],
   async ({ exchange_manager, memory, config, exchange_id = "" }) => {
     try {
+      if (config?.paperTrading) {
+        return "Paper mode uses DEFAULT_EXCHANGE for public market data. Change DEFAULT_EXCHANGE and restart the daemon.";
+      }
       const exchanges = exchange_manager.list();
       const active = exchange_manager.activeId;
 

@@ -13,10 +13,6 @@ export class CcxtMarketDataProvider implements MarketDataProvider {
     this.exchange = new ExchangeClass(opts);
   }
 
-  get ccxtInstance(): Exchange {
-    return this.exchange;
-  }
-
   async fetchTicker(symbol: string) {
     const t = await this.exchange.fetchTicker(symbol);
     return {

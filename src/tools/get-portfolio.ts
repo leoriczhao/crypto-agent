@@ -13,7 +13,7 @@ registerTool(
   async ({ exchange, broker, memory, sessionId }) => {
     try {
       const lines: string[] = [];
-      const ctx = memory ? resolveToolTradingContext(memory, sessionId) : null;
+      const ctx = broker ? resolveToolTradingContext(memory, sessionId) : null;
       const allocation = ctx ? memory?.getBotAllocation?.(ctx.botId, ctx.tradingAccountId, "USDT") : null;
       const balance = broker && ctx ? await broker.fetchBalance(ctx.botId) : await exchange.fetchBalance();
 

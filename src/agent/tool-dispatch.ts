@@ -6,9 +6,11 @@ import type { Memory } from "../memory.js";
 import type { SkillLoader } from "../skill-loader.js";
 import type { StrategyManager } from "../strategy/manager.js";
 import type { Broker } from "../broker/types.js";
+import type { MarketDataProvider } from "../market-data/types.js";
 
 export interface AgentToolDeps {
   getExchange: () => unknown;
+  getMarketData: () => MarketDataProvider;
   getConfig: () => typeof appConfig;
   getMemory: () => Memory | null;
   getSessionId: () => string;
@@ -30,6 +32,7 @@ export async function dispatchAgentTool(
 
   const depMap: Record<string, () => unknown> = {
     exchange: deps.getExchange,
+    market_data: deps.getMarketData,
     config: deps.getConfig,
     memory: deps.getMemory,
     sessionId: deps.getSessionId,

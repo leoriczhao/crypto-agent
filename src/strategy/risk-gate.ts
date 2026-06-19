@@ -1,4 +1,5 @@
 import type { BaseExchange } from "../exchange/base.js";
+import type { Broker } from "../broker/types.js";
 import type { Signal } from "./state.js";
 import type { StrategyManager } from "./manager.js";
 import type { Memory } from "../memory.js";
@@ -19,22 +20,28 @@ export interface RiskDecision {
  */
 export class RiskGate {
   private store: StrategyManager;
-  private exchange: BaseExchange;
+  private exchange: BaseExchange | null;
+  private broker: Broker | null;
+  private botId: string | null;
   private memory: Memory | null;
   private initialPortfolioValue: number;
   /** Fast-path rules are automated (no Soul context). Cap at riskParams only. */
   private readonly soulMaxPositionPct = 100;
 
-  constructor(
-    store: StrategyManager,
-    exchange: BaseExchange,
-    initialPortfolioValue: number,
-    memory: Memory | null = null,
-  ) {
-    this.store = store;
-    this.exchange = exchange;
-    this.memory = memory;
-    this.initialPortfolioValue = initialPortfolioValue;
+  constructor(opts: {
+    store: StrategyManager;
+    initialPortfolioValue: number;
+    memory?: Memory | null;
+    exchange?: BaseExchange | null;
+    broker?: Broker | null;
+    botId?: string | null;
+  }) {
+    this.store = opts.store;
+    this.exchange = opts.exchange ?? null;
+    this.broker = opts.broker ?? null;
+    this.botId = opts.botId ?? null;
+    this.memory = opts.memory ?? null;
+    this.initialPortfolioValue = opts.initialPortfolioValue;
   }
 
   async evaluate(signal: Signal): Promise<RiskDecision> {
@@ -57,6 +64,8 @@ export class RiskGate {
     const result = await checkTradeAllowed(
       {
         exchange: this.exchange,
+        broker: this.broker,
+        botId: this.botId ?? undefined,
         riskParams: this.store.riskParams,
         soulMaxPositionPct: this.soulMaxPositionPct,
         maxOrderSizeUsdt: Number.POSITIVE_INFINITY, // rule-defined size; no hard cap here
@@ -93,8 +102,12 @@ export class RiskGate {
   async updatePeakFromLiveState(): Promise<void> {
     if (!this.memory) return;
     try {
-      const balance = await this.exchange.fetchBalance();
-      const positions = await this.exchange.fetchPositions();
+      const balance = this.broker
+        ? await this.broker.fetchBalance(this.botId ?? undefined)
+        : await this.exchange?.fetchBalance() ?? {};
+      const positions = this.broker
+        ? await this.broker.fetchPositions(this.botId ?? undefined)
+        : await this.exchange?.fetchPositions() ?? {};
       const usdtFree = balance.USDT?.free ?? balance.USDT?.total ?? 0;
       let exposure = 0;
       for (const pos of Object.values(positions) as any[]) {

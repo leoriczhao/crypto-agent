@@ -636,9 +636,9 @@
           都带 <code>bot_id</code> / <code>trading_account_id</code>。这让历史记录不再只能靠 daemon 当前 exchange 来推断归属。
         </div>
         <div class="callout purple">
-          <strong>兼容旧库</strong><br>
-          <code>migrateAddIdentityColumns()</code> 给旧表补列，<code>ensureDefaultIdentity()</code> 创建默认身份并回填 NULL 行。
-          旧会话和旧交易记录不会因为模型升级而丢失。
+          <strong>新库边界</strong><br>
+          当前版本不再维护旧 SQLite schema 的自动迁移和回填路径。
+          重新部署时应使用当前 schema 创建新库，历史数据如需保留需要单独导入。
         </div>
       </div>
     </section>
@@ -683,7 +683,7 @@
         <div class="steps">
           <div class="step"><h4>LLM 创建策略规则</h4><p><code>plan_strategy</code>、<code>plan_ladder_strategy</code> 或 <code>plan_grid_strategy</code> 写入带类型的策略快照。</p></div>
           <div class="step"><h4>daemon 实时启动策略</h4><p><code>strategyAdded</code> 启动单个策略，并让 executor 监听该 symbol，无需重启。</p></div>
-          <div class="step"><h4>行情驱动策略</h4><p><code>MarketFeed</code> 监听 ticker、OHLCV 或 order book；能用 WebSocket 就用，否则轮询。</p></div>
+          <div class="step"><h4>行情驱动策略</h4><p><code>MarketFeed</code> 通过 <code>MarketDataProvider</code> 轮询 ticker、OHLCV 或 order book。</p></div>
           <div class="step"><h4>信号变成订单</h4><p><code>OrderExecutor.handleSignal()</code> 进入共享交易锁，评估风险，然后下单或拒绝。</p></div>
         </div>
         <div class="tags"><span class="tag">src/strategy/manager.ts:114</span><span class="tag">src/daemon.ts:225</span><span class="tag">src/market-feed.ts:133</span><span class="tag">src/strategy/executor.ts:143</span></div>
@@ -755,8 +755,8 @@
           <tr>
             <td>Broker / 交易所抽象</td>
             <td><code>src/broker/*</code>, <code>src/market-data/*</code>, <code>src/exchange/base.ts</code>, <code>live.ts</code></td>
-            <td>Paper 模式拆成公共行情 provider 和 SQLite-backed broker，并通过 adapter 保持旧 BaseExchange 接口；Live 模式仍包装 CCXT。</td>
-            <td><code>broker/paper-broker.ts</code>, <code>broker/exchange-adapter.ts</code>, <code>market-data/ccxt-provider.ts</code></td>
+            <td>Paper 模式拆成公共行情 provider 和 SQLite-backed broker，工具、风险门和执行器直接调用 broker；Live 模式仍包装 CCXT。</td>
+            <td><code>broker/paper-broker.ts</code>, <code>market-data/ccxt-provider.ts</code>, <code>exchange/live.ts</code></td>
           </tr>
           <tr>
             <td>自主策略引擎</td>
