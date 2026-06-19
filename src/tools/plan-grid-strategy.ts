@@ -1,4 +1,5 @@
 import { registerTool } from "./registry.js";
+import { checkBotFreeUsdt } from "./trading-context.js";
 
 registerTool(
   "plan_grid_strategy",
@@ -22,9 +23,11 @@ registerTool(
     },
     required: ["symbol", "lower_price", "upper_price", "grid_count", "size_per_grid", "allocated_usdt"],
   },
-  ["strategy_store"],
+  ["strategy_store", "memory", "sessionId"],
   async ({
     strategy_store,
+    memory,
+    sessionId,
     symbol,
     lower_price,
     upper_price,
@@ -43,6 +46,8 @@ registerTool(
       if (allocated_usdt < required) {
         return `Error: allocated_usdt ($${allocated_usdt}) < grid_count × size_per_grid ($${required}). All buys filling at once would exceed budget.`;
       }
+      const botAllocationError = checkBotFreeUsdt(memory, sessionId, allocated_usdt);
+      if (botAllocationError) return botAllocationError;
 
       const spacing = (upper_price - lower_price) / (grid_count - 1);
       const strat = strategy_store.addStrategy({

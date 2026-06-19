@@ -4,6 +4,10 @@ import { config } from "./config.js";
 import { PaperExchange } from "./exchange/paper.js";
 import { LiveExchange } from "./exchange/live.js";
 import { ExchangeManager } from "./exchange/manager.js";
+import { CcxtMarketDataProvider } from "./market-data/ccxt-provider.js";
+import { PaperBroker } from "./broker/paper-broker.js";
+import { BrokerExchangeAdapter } from "./broker/exchange-adapter.js";
+import type { Broker } from "./broker/types.js";
 import { TOOL_DEFINITIONS } from "./tools/registry.js";
 import { Soul } from "./soul.js";
 import { SkillLoader } from "./skill-loader.js";
@@ -13,7 +17,7 @@ import { buildWorldSnapshot } from "./world-snapshot.js";
 import { type AgentToolDeps } from "./agent/tool-dispatch.js";
 import { createAgentGraphRuntime } from "./agent/langgraph-runtime.js";
 import type { AgentMessage } from "./agent/provider-step.js";
-import type { Memory } from "./memory.js";
+import type { DefaultIdentity, Memory } from "./memory.js";
 import type { StrategyManager } from "./strategy/manager.js";
 import "./tools/index.js";
 
@@ -53,6 +57,7 @@ export class CryptoAgent {
   sessions: SessionManager;
   memory: Memory | null = null;
   strategyStore: StrategyManager | null = null;
+  broker: Broker | null = null;
   provider: string;
   client: any;
   private langGraphRuntime = createAgentGraphRuntime();
@@ -82,9 +87,17 @@ export class CryptoAgent {
     if (this.client) return;
     if (this.provider === "openai") {
       const { default: OpenAI } = await import("openai");
-      this.client = new OpenAI({
+      const openaiOptions: Record<string, any> = {
         apiKey: config.apiKey,
         baseURL: config.apiBaseUrl || undefined,
+      };
+      if (config.apiBaseUrl.includes("api.deepseek.com")) {
+        // DeepSeek's CloudFront path can prematurely close compressed responses
+        // from the OpenAI SDK. Identity encoding keeps SDK streaming stable.
+        openaiOptions.defaultHeaders = { "Accept-Encoding": "identity" };
+      }
+      this.client = new OpenAI({
+        ...openaiOptions,
       });
     } else {
       const { default: Anthropic } = await import("@anthropic-ai/sdk");
@@ -97,6 +110,35 @@ export class CryptoAgent {
 
   get exchange() {
     return this.exchangeManager.active;
+  }
+
+  configurePaperBroker(opts: {
+    memory: Memory;
+    identity: DefaultIdentity;
+    initialBalance: Record<string, number>;
+    httpsProxy?: string;
+  }): void {
+    const exchangeId = opts.identity.tradingAccount.exchangeId || config.defaultExchange;
+    opts.memory.ensureBotAllocation({
+      botId: opts.identity.bot.id,
+      tradingAccountId: opts.identity.tradingAccount.id,
+      asset: "USDT",
+      amount: opts.initialBalance.USDT ?? 10000,
+    });
+    const marketData = new CcxtMarketDataProvider(exchangeId, opts.httpsProxy ?? "");
+    const broker = new PaperBroker({
+      memory: opts.memory,
+      marketData,
+      tradingAccountId: opts.identity.tradingAccount.id,
+    });
+    this.broker = broker;
+    this.exchangeManager.register(exchangeId, new BrokerExchangeAdapter({
+      marketData,
+      broker,
+      botId: opts.identity.bot.id,
+      tradingAccountId: opts.identity.tradingAccount.id,
+    }));
+    this.exchangeManager.setActive(exchangeId);
   }
 
   get systemPrompt(): string {
@@ -112,19 +154,23 @@ export class CryptoAgent {
       getSessionId: () => sessionId,
       getSoul: () => this.soul.profile,
       getExchangeManager: () => this.exchangeManager,
+      getBroker: () => this.broker,
       getAgent: () => this,
       getSkillLoader: () => this.skillLoader,
       getStrategyStore: () => this.strategyStore,
     };
   }
 
-  private async buildFullSystemPrompt(): Promise<string> {
+  private async buildFullSystemPrompt(sessionId?: string): Promise<string> {
     let prompt = this.systemPrompt;
     if (config.worldSnapshotEnabled) {
       try {
         const snapshot = await buildWorldSnapshot(this.exchange, {
           paperTrading: config.paperTrading,
           strategyStore: this.strategyStore,
+          memory: this.memory,
+          broker: this.broker,
+          sessionId,
         });
         prompt += `\n\n## Current State\n${snapshot}`;
       } catch {
@@ -150,7 +196,7 @@ export class CryptoAgent {
     throwIfCancelled(callbacks.signal);
     session.lastActiveAt = new Date();
 
-    const sysPrompt = await this.buildFullSystemPrompt();
+    const sysPrompt = await this.buildFullSystemPrompt(sessionId);
     throwIfCancelled(callbacks.signal);
     const result = await this.langGraphRuntime.run({
       provider: this.provider,

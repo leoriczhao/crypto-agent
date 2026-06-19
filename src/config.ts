@@ -75,6 +75,7 @@ export const config = {
   paperTrading: (process.env.PAPER_TRADING ?? "true").toLowerCase() === "true",
   initialBalance: { USDT: parseFloat(process.env.INITIAL_BALANCE_USDT ?? "10000") } as Record<string, number>,
   maxOrderSizeUsdt: parseFloat(process.env.MAX_ORDER_SIZE_USDT ?? "1000"),
+  paperMaxLeverage: parseFloat(process.env.PAPER_MAX_LEVERAGE ?? "5"),
   heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL ?? "60", 10),
   memoryDbPath: process.env.MEMORY_DB_PATH ?? "crypto_agent.db",
   notifyTelegramToken: process.env.TELEGRAM_BOT_TOKEN ?? "",

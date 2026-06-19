@@ -2,6 +2,7 @@ import { registerTool } from "./registry.js";
 import { checkTradeAllowed } from "../trade-guard.js";
 import { DEFAULT_RISK_PARAMS } from "../strategy/state.js";
 import { withTradeLock } from "../trade-lock.js";
+import { resolveToolTradingContext } from "./trading-context.js";
 
 registerTool(
   "sell",
@@ -16,17 +17,17 @@ registerTool(
     },
     required: ["symbol", "amount"],
   },
-  ["exchange", "config", "memory", "sessionId", "soul", "strategy_store"],
-  async ({ exchange, config, memory, sessionId, soul, strategy_store, symbol, amount, order_type = "market", price }) => {
+  ["exchange", "config", "memory", "sessionId", "soul", "strategy_store", "broker"],
+  async ({ exchange, config, memory, sessionId, soul, strategy_store, broker, symbol, amount, order_type = "market", price }) => {
     try {
       if (amount <= 0) return "Error: amount must be > 0";
       const ticker = await exchange.fetchTicker(symbol);
       const cost = ticker.last * amount;
       const riskParams = strategy_store?.riskParams ?? DEFAULT_RISK_PARAMS;
-      const watermark = memory?.getPortfolioWatermark();
+      const watermark = memory?.getPortfolioWatermark?.();
       const baseline = watermark?.peakValue ?? (config.initialBalance.USDT ?? 10000);
       const today = new Date().toISOString().slice(0, 10);
-      const dailyPnl = memory?.getDailyPnl(today);
+      const dailyPnl = memory?.getDailyPnl?.(today);
 
       return await withTradeLock(`sell ${symbol} ${amount}`, async () => {
         const guard = await checkTradeAllowed(
@@ -46,7 +47,7 @@ registerTool(
 
         const mode = config.paperTrading ? "PAPER" : "LIVE";
 
-        const pendingId = memory?.createPendingOrder({
+        const pendingId = memory?.createPendingOrder?.({
           sessionId,
           symbol,
           side: "sell",
@@ -55,22 +56,36 @@ registerTool(
           amount,
         }) ?? null;
 
-        const result = await exchange.createOrder(symbol, "sell", order_type, amount, price);
+        const ctx = resolveToolTradingContext(memory, sessionId);
+        const result = config.paperTrading && broker
+          ? await broker.createOrder({
+              symbol,
+              marketType: "spot",
+              side: "sell",
+              orderType: order_type,
+              amount,
+              price: order_type === "limit" ? price ?? null : null,
+              actorType: ctx.actorType,
+              actorId: ctx.actorId,
+              botId: ctx.botId,
+              tradingAccountId: ctx.tradingAccountId,
+            })
+          : await exchange.createOrder(symbol, "sell", order_type, amount, price);
         if (result.error) {
-          if (pendingId !== null) memory?.updatePendingOrder(pendingId, { status: "unknown" });
+          if (pendingId !== null) memory?.updatePendingOrder?.(pendingId, { status: "unknown" });
           return `[${mode}] Sell failed: ${result.error}`;
         }
 
         if (pendingId !== null) {
           const finalStatus = order_type === "market" ? "filled" : "open";
-          memory?.updatePendingOrder(pendingId, {
+          memory?.updatePendingOrder?.(pendingId, {
             exchangeOrderId: result.id ?? null,
             status: finalStatus,
           });
         }
 
         if (memory && sessionId) {
-          memory.logTrade(sessionId, {
+          memory.logTrade?.(sessionId, {
             symbol,
             side: "sell",
             amount,

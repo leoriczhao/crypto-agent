@@ -435,7 +435,7 @@
   <main class="page">
     <div class="topbar">
       <div class="brand"><span class="mark" aria-hidden="true"></span><span>Crypto Agent 架构说明</span></div>
-      <div>基于本地源码生成于 2026-06-18</div>
+      <div>基于本地源码更新于 2026-06-20</div>
     </div>
 
     <header class="hero">
@@ -443,14 +443,15 @@
         <h1>一个长驻 daemon 驱动的加密交易 Agent</h1>
         <p class="subtitle">
           这个项目不是一个简单的命令行聊天机器人。当前实现是两进程架构：
-          daemon 持有状态、策略、交易执行和 SQLite，CLI 只是通过 Unix socket 连接的薄客户端。
+          daemon 持有账户身份、策略、交易执行、SQLite 和 LangGraph agent runtime，
+          CLI 只是通过 Unix socket 连接的薄客户端。
         </p>
       </div>
       <aside class="note">
         <strong>先纠正一个容易误读的点</strong>
         <p>
           <code>README.md</code> 还保留了早期 “CLI -> Agent Loop -> LLM” 的图。
-          当前代码的实际边界是 <code>CLI -> IPC -> daemon -> Agent/Strategy/Exchange</code>。
+          当前代码的实际边界是 <code>CLI -> IPC -> daemon -> LangGraph Agent / Strategy / Exchange</code>。
           本页按代码实现解释，不按旧 README 图解释。
         </p>
       </aside>
@@ -458,16 +459,16 @@
 
     <div class="kpis" aria-label="项目事实">
       <div class="kpi"><div class="value">2</div><div class="label">运行进程：daemon + CLI</div></div>
+      <div class="kpi"><div class="value">2</div><div class="label">LangGraph 节点：model + tools</div></div>
       <div class="kpi"><div class="value">24</div><div class="label">当前构建注册的 LLM 工具</div></div>
-      <div class="kpi"><div class="value">75</div><div class="label"><code>src/</code> 下的 TypeScript 源文件</div></div>
-      <div class="kpi"><div class="value">30</div><div class="label"><code>test/</code> 下的 Vitest 测试文件</div></div>
+      <div class="kpi"><div class="value">4</div><div class="label">身份链：资金账户 -> 交易账户 -> bot -> 会话</div></div>
     </div>
 
     <section id="mental-model">
       <div class="section-head">
         <h2>心智模型</h2>
         <p class="section-copy">
-          可以把 daemon 理解成交易控制平面。它持有账户相关状态、风险闸门、策略运行时、
+          可以把 daemon 理解成交易控制平面。它持有账户身份、风险闸门、策略运行时、
           心跳、cron 循环和持久化。客户端可以随时连接或断开，但不拥有交易状态。
         </p>
       </div>
@@ -478,25 +479,25 @@
           <p>
             <code>CryptoDaemon</code> 创建 <code>CryptoAgent</code>、<code>Memory</code>、
             <code>StrategyManager</code>, <code>StrategyRuntime</code>, <code>RiskGate</code>,
-            和 <code>OrderExecutor</code>。入口见 <code>src/daemon.ts:47</code>。
+            和 <code>OrderExecutor</code>。入口见 <code>src/daemon.ts:48</code>。
           </p>
-          <div class="tags"><span class="tag">src/daemon.ts:21</span><span class="tag">src/daemon.ts:47</span></div>
+          <div class="tags"><span class="tag">src/daemon.ts:48</span><span class="tag">src/daemon.ts:120</span></div>
         </article>
         <article class="card">
           <h3>IPC 是 JSONL 协议</h3>
           <p>
             CLI 发送 <code>hello</code>、<code>chat</code>、<code>slash</code>、<code>sessions</code>、
-            <code>status</code>、<code>cancel</code> 和 <code>ping</code>。服务端流式返回增量内容，并广播事件。
+            <code>status</code>、<code>cancel</code> 和 <code>ping</code>。welcome 会带回 mode、exchange、bot 和 trading account。
           </p>
-          <div class="tags"><span class="tag">src/ipc/protocol.ts:10</span><span class="tag">src/ipc/server.ts:65</span></div>
+          <div class="tags"><span class="tag">src/ipc/protocol.ts:21</span><span class="tag">src/ipc/server.ts:176</span></div>
         </article>
         <article class="card">
           <h3>两条执行路径</h3>
           <p>
-            慢路径：LLM 循环加工具调用。快路径：市场数据触发策略信号，绕开 LLM 延迟。
+            慢路径：LangGraph 节点循环调用模型和工具。快路径：市场数据触发策略信号，绕开 LLM 延迟。
             两条路径最终都会落到共享的交易所抽象和风险控制原语上。
           </p>
-          <div class="tags"><span class="tag">src/agent.ts:152</span><span class="tag">src/daemon.ts:116</span></div>
+          <div class="tags"><span class="tag">src/agent.ts:155</span><span class="tag">src/agent/langgraph-runtime.ts:46</span></div>
         </article>
       </div>
     </section>
@@ -549,7 +550,7 @@
 
           <rect x="490" y="128" width="290" height="80" rx="8" class="box"></rect>
           <text x="515" y="158" class="label">CryptoAgent</text>
-          <text x="515" y="182" class="sub">prompt、会话、LLM 流、工具派发</text>
+          <text x="515" y="182" class="sub">prompt、会话、LangGraph runtime</text>
 
           <rect x="490" y="236" width="290" height="92" rx="8" class="fast"></rect>
           <text x="515" y="266" class="label">策略运行时</text>
@@ -562,7 +563,7 @@
 
           <rect x="490" y="462" width="290" height="64" rx="8" class="persist"></rect>
           <text x="515" y="492" class="label">Memory</text>
-          <text x="515" y="515" class="sub">SQLite WAL 持久化</text>
+          <text x="515" y="515" class="sub">SQLite WAL + identity + paper broker</text>
 
           <rect x="875" y="90" width="205" height="88" rx="8" class="box"></rect>
           <text x="910" y="124" class="label">LLM 提供方</text>
@@ -573,8 +574,8 @@
           <text x="910" y="289" class="sub">24 个工具 + 依赖注入</text>
 
           <rect x="875" y="372" width="205" height="96" rx="8" class="box"></rect>
-          <text x="910" y="406" class="label">交易所层</text>
-          <text x="910" y="431" class="sub">PaperExchange / LiveExchange</text>
+          <text x="910" y="406" class="label">Broker / 交易所层</text>
+          <text x="910" y="431" class="sub">PaperBroker adapter / LiveExchange</text>
 
           <rect x="875" y="500" width="205" height="64" rx="8" class="box"></rect>
           <text x="910" y="532" class="label">CCXT 交易所</text>
@@ -595,16 +596,64 @@
       </div>
     </section>
 
+    <section id="identity">
+      <div class="section-head">
+        <h2>身份映射</h2>
+        <p class="section-copy">
+          这次重构最重要的修正不是换框架，而是把“钱、交易账户、bot、会话”从隐含全局状态拆成可审计的持久映射。
+          当前实现仍是保守的单 daemon 默认 bot，但交易、挂单、持仓和策略已经带上 bot/account 归属。
+        </p>
+      </div>
+
+      <div class="matrix">
+        <article class="card">
+          <h3>1. 资金账户</h3>
+          <p><code>funding_accounts</code> 表示资金池或资金所有者。默认实现创建 <code>default-funding</code>，基础币种默认 USDT。</p>
+          <div class="tags"><span class="tag">src/memory.ts:137</span><span class="tag">src/memory.ts:525</span></div>
+        </article>
+        <article class="card">
+          <h3>2. 交易账户</h3>
+          <p><code>trading_accounts</code> 绑定资金账户、交易所和 PAPER/LIVE 模式，例如 <code>default-trading-gateio-paper</code>。</p>
+          <div class="tags"><span class="tag">src/memory.ts:145</span><span class="tag">src/memory.ts:526</span></div>
+        </article>
+        <article class="card">
+          <h3>3. 交易 bot</h3>
+          <p><code>trading_bots</code> 绑定一个交易账户。daemon 启动时把当前 active bot 写入 <code>daemon_state</code>。</p>
+          <div class="tags"><span class="tag">src/memory.ts:157</span><span class="tag">src/daemon.ts:120</span></div>
+        </article>
+        <article class="card">
+          <h3>4. 会话</h3>
+          <p><code>sessions.bot_id</code> 把聊天上下文绑定到 bot。welcome 消息把 bot 和 trading account 发给 CLI 展示。</p>
+          <div class="tags"><span class="tag">src/memory.ts:167</span><span class="tag">src/ipc/protocol.ts:21</span></div>
+        </article>
+      </div>
+
+      <div style="height:16px"></div>
+      <div class="two">
+        <div class="callout green">
+          <strong>审计归属</strong><br>
+          <code>trades</code>、<code>pending_orders</code>、<code>active_positions</code> 和 <code>strategies</code>
+          都带 <code>bot_id</code> / <code>trading_account_id</code>。这让历史记录不再只能靠 daemon 当前 exchange 来推断归属。
+        </div>
+        <div class="callout purple">
+          <strong>兼容旧库</strong><br>
+          <code>migrateAddIdentityColumns()</code> 给旧表补列，<code>ensureDefaultIdentity()</code> 创建默认身份并回填 NULL 行。
+          旧会话和旧交易记录不会因为模型升级而丢失。
+        </div>
+      </div>
+    </section>
+
     <section id="flows">
       <div class="section-head">
         <h2>运行流程</h2>
         <p class="section-copy">
-          使用标签切换几条主流程：聊天请求、自主执行、重启恢复，以及风险/下单串行化。
+          使用标签切换几条主流程：聊天请求、身份绑定、自主执行、重启恢复，以及风险/下单串行化。
         </p>
       </div>
 
       <div class="tabs" role="tablist" aria-label="运行流程">
         <button class="tab" role="tab" aria-selected="true" data-flow="chat">聊天请求</button>
+        <button class="tab" role="tab" aria-selected="false" data-flow="identity">身份绑定</button>
         <button class="tab" role="tab" aria-selected="false" data-flow="strategy">策略快路径</button>
         <button class="tab" role="tab" aria-selected="false" data-flow="startup">daemon 启动</button>
         <button class="tab" role="tab" aria-selected="false" data-flow="risk">风险与下单锁</button>
@@ -613,11 +662,21 @@
       <div class="flow-panel active" id="flow-chat">
         <div class="steps">
           <div class="step"><h4>客户端发送聊天</h4><p><code>IpcClient.startChat()</code> 写入 JSONL <code>chat</code> 消息，包含 session、requestId 和内容。</p></div>
-          <div class="step"><h4>daemon 持久化用户回合</h4><p><code>handleChat()</code> 解析会话，先保存用户消息，再调用 agent。</p></div>
-          <div class="step"><h4>Agent 流式运行 LLM 循环</h4><p><code>chatInSession()</code> 做上下文压缩、注入世界快照，然后流式输出 OpenAI 或 Anthropic 响应。</p></div>
-          <div class="step"><h4>工具按依赖执行</h4><p>工具 handler 只拿到声明过的依赖：exchange、memory、config、soul、strategy store 等。</p></div>
+          <div class="step"><h4>daemon 持久化用户回合</h4><p><code>handleChat()</code> 解析会话，保存用户消息，然后调用 <code>agent.chatInSession()</code>。</p></div>
+          <div class="step"><h4>Agent 准备图输入</h4><p><code>chatInSession()</code> 做 micro/auto compact，注入 world snapshot，再把消息交给 LangGraph runtime。</p></div>
+          <div class="step"><h4>LangGraph 循环到结束</h4><p><code>call_model</code> 产出 assistant 消息；如果存在 tool call，就进 <code>tools</code> 节点后回到模型。</p></div>
         </div>
-        <div class="tags"><span class="tag">src/ipc/client.ts:92</span><span class="tag">src/daemon.ts:265</span><span class="tag">src/agent.ts:152</span><span class="tag">src/tools/registry.ts:24</span></div>
+        <div class="tags"><span class="tag">src/ipc/client.ts:92</span><span class="tag">src/daemon.ts:291</span><span class="tag">src/agent.ts:137</span><span class="tag">src/agent/langgraph-runtime.ts:46</span></div>
+      </div>
+
+      <div class="flow-panel" id="flow-identity">
+        <div class="steps">
+          <div class="step"><h4>恢复 daemon 选择</h4><p>启动时先恢复 <code>active_soul</code>、<code>active_exchange</code> 和 <code>active_user_session_id</code>。</p></div>
+          <div class="step"><h4>确保默认身份</h4><p><code>ensureDefaultIdentity()</code> 创建或刷新 funding account、trading account 和 bot。</p></div>
+          <div class="step"><h4>会话绑定 bot</h4><p>系统会话和用户会话通过 <code>sessions.bot_id</code> 归属到当前 active bot。</p></div>
+          <div class="step"><h4>记录随交易流动</h4><p>交易、挂单、持仓和策略写入时都携带 bot/account 字段，避免事后靠全局状态猜。</p></div>
+        </div>
+        <div class="tags"><span class="tag">src/daemon.ts:99</span><span class="tag">src/daemon.ts:120</span><span class="tag">src/memory.ts:601</span><span class="tag">src/memory.ts:721</span></div>
       </div>
 
       <div class="flow-panel" id="flow-strategy">
@@ -633,11 +692,11 @@
       <div class="flow-panel" id="flow-startup">
         <div class="steps">
           <div class="step"><h4>systemd 启动 dist</h4><p>用户级服务在项目目录运行 <code>node dist/daemon.js</code>，并读取 <code>.env</code>。</p></div>
-          <div class="step"><h4>加锁并恢复状态</h4><p><code>acquireDaemonLock()</code> 防止重复启动；随后 daemon 恢复 soul、exchange、sessions 和策略状态。</p></div>
+          <div class="step"><h4>加锁并恢复状态</h4><p><code>acquireDaemonLock()</code> 防止重复启动；随后 daemon 恢复 soul、exchange、identity、sessions 和策略状态。</p></div>
           <div class="step"><h4>对账交易状态</h4><p>启动时恢复 active positions，并把 pending orders 与交易所 open orders 对账。</p></div>
           <div class="step"><h4>心跳、cron、快路径</h4><p>心跳和 cron 循环启动；快路径要么监听活跃策略，要么报告 idle。</p></div>
         </div>
-        <div class="tags"><span class="tag">systemd/crypto-agent.service.template:7</span><span class="tag">src/daemon.ts:795</span><span class="tag">src/daemon.ts:618</span><span class="tag">src/daemon.ts:752</span></div>
+        <div class="tags"><span class="tag">systemd/crypto-agent.service.template:7</span><span class="tag">src/daemon.ts:99</span><span class="tag">src/daemon.ts:120</span><span class="tag">src/daemon.ts:752</span></div>
       </div>
 
       <div class="flow-panel" id="flow-risk">
@@ -672,32 +731,32 @@
           <tr>
             <td>Daemon 控制平面</td>
             <td><code>src/daemon.ts</code></td>
-            <td>创建有状态服务，暴露 IPC handler，启动 heartbeat/cron/fast path，负责恢复和干净关闭。</td>
-            <td><code>src/daemon.ts:21</code>, <code>:47</code>, <code>:752</code></td>
+            <td>创建有状态服务，恢复 soul/exchange/identity，暴露 IPC handler，启动 heartbeat/cron/fast path，并负责干净关闭。</td>
+            <td><code>src/daemon.ts:48</code>, <code>:99</code>, <code>:120</code>, <code>:752</code></td>
           </tr>
           <tr>
             <td>IPC 层</td>
             <td><code>src/ipc/protocol.ts</code>, <code>server.ts</code>, <code>client.ts</code></td>
-            <td>Unix socket 上的按行 JSON 协议，负责请求关联、取消、状态快照和事件广播。</td>
-            <td><code>src/ipc/protocol.ts:10</code>, <code>server.ts:174</code>, <code>client.ts:92</code></td>
+            <td>Unix socket 上的按行 JSON 协议，负责请求关联、取消、状态快照、welcome 身份元数据和事件广播。</td>
+            <td><code>src/ipc/protocol.ts:10</code>, <code>:21</code>, <code>server.ts:176</code>, <code>client.ts:92</code></td>
           </tr>
           <tr>
-            <td>LLM agent 循环</td>
-            <td><code>src/agent.ts</code>, <code>src/llm/provider.ts</code></td>
-            <td>构建 prompt，选择 OpenAI 或 Anthropic，流式响应，并用依赖注入派发工具调用。</td>
-            <td><code>src/agent.ts:85</code>, <code>:111</code>, <code>:152</code></td>
+            <td>LLM agent 图运行时</td>
+            <td><code>src/agent.ts</code>, <code>src/agent/langgraph-runtime.ts</code>, <code>provider-step.ts</code>, <code>tool-dispatch.ts</code></td>
+            <td>构建 prompt 和上下文，把消息交给 LangGraph；provider step 适配 OpenAI/Anthropic 流，tool-dispatch 保留原工具依赖注入。</td>
+            <td><code>src/agent.ts:137</code>, <code>langgraph-runtime.ts:46</code>, <code>provider-step.ts:101</code>, <code>tool-dispatch.ts:21</code></td>
           </tr>
           <tr>
             <td>工具</td>
             <td><code>src/tools/*</code>, <code>src/tools/registry.ts</code></td>
-            <td>24 个已注册动作：行情、交易、策略规划、会话控制、KB、压缩和委派。</td>
+            <td>已注册动作：行情、现货交易、paper 合约开平仓、策略规划、会话控制、KB、压缩和委派。工具行为仍由 handler 决定。</td>
             <td><code>src/tools/index.ts:1</code>, <code>registry.ts:24</code></td>
           </tr>
           <tr>
-            <td>交易所抽象</td>
-            <td><code>src/exchange/base.ts</code>, <code>paper.ts</code>, <code>live.ts</code></td>
-            <td>共享交易所接口。Paper 模式使用真实行情但模拟成交；Live 模式包装 CCXT。</td>
-            <td><code>base.ts:1</code>, <code>paper.ts:18</code>, <code>live.ts:4</code></td>
+            <td>Broker / 交易所抽象</td>
+            <td><code>src/broker/*</code>, <code>src/market-data/*</code>, <code>src/exchange/base.ts</code>, <code>live.ts</code></td>
+            <td>Paper 模式拆成公共行情 provider 和 SQLite-backed broker，并通过 adapter 保持旧 BaseExchange 接口；Live 模式仍包装 CCXT。</td>
+            <td><code>broker/paper-broker.ts</code>, <code>broker/exchange-adapter.ts</code>, <code>market-data/ccxt-provider.ts</code></td>
           </tr>
           <tr>
             <td>自主策略引擎</td>
@@ -712,10 +771,16 @@
             <td><code>trade-lock.ts:1</code>, <code>trade-guard.ts:27</code>, <code>risk-gate.ts:13</code></td>
           </tr>
           <tr>
+            <td>账户 / bot / 会话映射</td>
+            <td><code>src/memory.ts</code>, <code>src/daemon.ts</code>, <code>src/ipc/protocol.ts</code></td>
+            <td>资金账户 -> 交易账户 -> 交易 bot -> 会话。交易、挂单、持仓和策略记录携带 bot/account 归属。</td>
+            <td><code>memory.ts:137</code>, <code>:516</code>, <code>:609</code>, <code>daemon.ts:120</code>, <code>protocol.ts:21</code></td>
+          </tr>
+          <tr>
             <td>持久化</td>
             <td><code>src/memory.ts</code>, <code>docs/persistence.md</code></td>
-            <td>SQLite WAL 表保存会话、交易、策略、活跃持仓、挂单、daily PnL、daemon 状态和研究 KB。</td>
-            <td><code>memory.ts:75</code>, <code>docs/persistence.md:20</code></td>
+            <td>SQLite WAL 表保存身份、会话、交易、策略、活跃持仓、挂单、daily PnL、daemon 状态和研究 KB。</td>
+            <td><code>memory.ts:123</code>, <code>docs/persistence.md:20</code></td>
           </tr>
         </tbody>
       </table>
@@ -725,7 +790,7 @@
       <div class="section-head">
         <h2>工具面</h2>
         <p class="section-copy">
-          工具声明自己需要的依赖，而不是让 agent 为每个工具写分支。这是主要扩展点。
+          工具声明自己需要的依赖，而不是让 LangGraph 节点或 agent 为每个工具写分支。这仍然是主要扩展点。
         </p>
       </div>
 
@@ -758,6 +823,13 @@
         </p>
       </div>
 
+      <div class="callout">
+        <strong>账户身份状态</strong><br>
+        <code>funding_accounts</code>、<code>trading_accounts</code>、<code>trading_bots</code> 和
+        <code>sessions.bot_id</code> 共同描述“谁的钱、哪个交易账户、哪个 bot、哪段会话”。
+        <code>daemon_state</code> 额外保存 active identity 指针，便于重启恢复。
+      </div>
+      <div style="height:16px"></div>
       <div class="two">
         <div class="callout green">
           <strong>崩溃恢复状态</strong><br>
@@ -767,7 +839,7 @@
         <div class="callout purple">
           <strong>Agent 记忆状态</strong><br>
           <code>sessions</code>, <code>conversations</code>, <code>session_summaries</code>, <code>daemon_state</code>,
-          <code>strategies</code> 和 <code>strategy_kb</code> 保存用户上下文和策略研究结果。
+          <code>strategies</code> 和 <code>strategy_kb</code> 保存用户上下文、active identity 和策略研究结果。
         </div>
       </div>
     </section>
@@ -787,9 +859,10 @@
             <button class="copy-btn" data-copy="commands">复制</button>
           </div>
           <pre id="commands">npm run build
-	npm run daemon     # 前台运行 daemon
-	npm run dev        # 连接 CLI 客户端
-	npm test           # 运行 Vitest 测试</pre>
+npm run daemon              # 前台运行 daemon
+npm run dev                 # 连接 CLI 客户端
+npm test                    # 运行 Vitest 测试
+npm audit --audit-level=low # 依赖审计</pre>
         </div>
         <div>
           <div class="copy-row">
@@ -823,26 +896,29 @@ tail -f ~/.local/state/crypto-agent/daemon.err</pre>
       <ul class="source-list">
         <li><code>README.md</code> 和 <code>package.json</code></li>
         <li><code>src/daemon.ts</code></li>
-        <li><code>src/agent.ts</code></li>
+        <li><code>src/agent.ts</code>, <code>src/agent/langgraph-runtime.ts</code>, <code>src/agent/provider-step.ts</code>, <code>src/agent/tool-dispatch.ts</code></li>
         <li><code>src/config.ts</code></li>
         <li><code>src/ipc/protocol.ts</code>, <code>server.ts</code>, <code>client.ts</code></li>
-        <li><code>src/tools/index.ts</code>, <code>registry.ts</code></li>
+        <li><code>src/tools/index.ts</code>, <code>registry.ts</code>, <code>open-position.ts</code>, <code>close-position.ts</code></li>
+        <li><code>src/broker/types.ts</code>, <code>paper-broker.ts</code>, <code>exchange-adapter.ts</code>, <code>symbols.ts</code></li>
+        <li><code>src/market-data/types.ts</code>, <code>ccxt-provider.ts</code></li>
         <li><code>src/exchange/base.ts</code>, <code>manager.ts</code>, <code>paper.ts</code>, <code>live.ts</code></li>
         <li><code>src/strategy/manager.ts</code>, <code>runtime.ts</code>, <code>executor.ts</code>, <code>risk-gate.ts</code>, <code>evaluator.ts</code></li>
         <li><code>src/market-feed.ts</code></li>
         <li><code>src/trade-lock.ts</code>, <code>src/trade-guard.ts</code></li>
         <li><code>src/memory.ts</code></li>
+        <li><code>test/agent-tool-dispatch.test.ts</code>, <code>test/langgraph-agent-runtime.test.ts</code>, <code>test/memory.test.ts</code>, <code>test/persistence.test.ts</code>, <code>test/paper-broker.test.ts</code>, <code>test/paper-contracts.test.ts</code></li>
         <li><code>src/context.ts</code>, <code>src/world-snapshot.ts</code>, <code>src/heartbeat.ts</code>, <code>src/sub-agents.ts</code></li>
-        <li><code>docs/persistence.md</code></li>
+        <li><code>docs/persistence.md</code>, <code>docs/superpowers/plans/2026-06-18-account-bot-session-mapping.md</code>, <code>docs/superpowers/plans/2026-06-19-langgraph-agent-layer.md</code></li>
         <li><code>systemd/crypto-agent.service.template</code>, <code>scripts/install-daemon.sh</code></li>
       </ul>
     </section>
 
     <footer class="footer">
       <p>
-        来源说明：2026-06-18 扫描了本地仓库的 <code>src/</code>、<code>test/</code>、<code>docs/</code>、
-        <code>scripts/</code>、<code>systemd/</code> 和 <code>skills/</code>。该范围内共有 113 个文件，
-        包括 75 个 TypeScript 源文件和 30 个 Vitest 文件。本页阅读并总结了上面列出的关键架构文件；
+        来源说明：2026-06-20 扫描了本地仓库的 <code>src/</code>、<code>test/</code>、<code>docs/</code>、
+        <code>scripts/</code>、<code>systemd/</code> 和 <code>skills/</code>。该范围内共有 121 个文件，
+        包括 72 个 <code>src/</code> TypeScript 源文件和 32 个 <code>test/</code> TypeScript 测试文件。本页阅读并总结了上面列出的关键架构文件；
         不声称逐行阅读了每一个工具 handler 或每一个测试文件。
       </p>
       <p>
@@ -855,6 +931,7 @@ tail -f ~/.local/state/crypto-agent/daemon.err</pre>
     const tabs = document.querySelectorAll(".tab");
     const panels = {
       chat: document.getElementById("flow-chat"),
+      identity: document.getElementById("flow-identity"),
       strategy: document.getElementById("flow-strategy"),
       startup: document.getElementById("flow-startup"),
       risk: document.getElementById("flow-risk")

@@ -39,6 +39,10 @@ API) is explicitly NOT persisted.
 | `daemon_state` (B0) | KV for soul / exchange / session pointers | `memory.ts` / daemon & tools |
 | `strategies` (B1) | Polymorphic strategy snapshots (`signal`, `ladder`, `grid`) + bot/account attribution | `memory.ts` / `strategy/manager.ts` |
 | `strategy_kb` (C0) | Strategist research outcomes and failure reasons | `memory.ts` / KB tools |
+| `bot_allocations` | Paper bot wallet allocation and free/used/realized-PnL accounting | `memory.ts` / `broker/paper-broker.ts` |
+| `paper_orders` | Local paper order book and filled/cancelled paper order history | `memory.ts` / `broker/paper-broker.ts` |
+| `paper_positions` | Local paper spot/swap positions, margin, mark price, and unrealized PnL | `memory.ts` / `broker/paper-broker.ts` |
+| `paper_fills` | Paper fill audit log with actor, bot, and trading-account attribution | `memory.ts` / `broker/paper-broker.ts` |
 
 ## Restart reconciliation flow
 
@@ -49,8 +53,12 @@ API) is explicitly NOT persisted.
 3. `ensureDefaultIdentity()` creates or refreshes the default funding account,
    trading account, and bot for the active exchange/mode, then backfills legacy
    rows whose bot/account columns are still NULL.
-4. `StrategyManager.loadFromDb()` restores strategies + risk params.
-5. `startFastPath()` → `OrderExecutor.restore()` loads `active_positions`
+4. In paper mode, `CryptoAgent.configurePaperBroker()` seeds the active bot's
+   USDT allocation if missing and replaces the daemon exchange with
+   `BrokerExchangeAdapter(PaperBroker + CcxtMarketDataProvider)`. Market data is
+   public CCXT data; orders never leave the local SQLite-backed paper broker.
+5. `StrategyManager.loadFromDb()` restores strategies + risk params.
+6. `startFastPath()` → `OrderExecutor.restore()` loads `active_positions`
    and cross-checks with `exchange.fetchPositions()`:
    - **Match** → restore SL/TP into in-memory map.
    - **Local record, no exchange position** → drop (stale).
@@ -58,10 +66,10 @@ API) is explicitly NOT persisted.
      decides.
    - **Exchange unreachable** → keep local records; retry on the next
      evaluate.
-6. `reconcilePendingOrders()` loads `status='open'` orders and compares
+7. `reconcilePendingOrders()` loads `status='open'` orders and compares
    against `exchange.fetchOpenOrders()`. Missing IDs → mark `filled`.
-7. `HeartbeatScheduler.start()`.
-8. `cronLoop()` begins.
+8. `HeartbeatScheduler.start()`.
+9. `cronLoop()` begins.
 
 ## Implemented (Iteration 11)
 
@@ -131,6 +139,32 @@ allocated USDT by stacking live positions or resting entry orders.
 The strategist sub-agent records adopted, rejected, and pending hypotheses in
 `strategy_kb`, including failure reasons. This makes failed research reusable
 instead of letting the LLM repeat the same weak ideas.
+
+### P0 — Persistent paper broker
+Paper mode now separates public market data from execution/accounting:
+
+- `CcxtMarketDataProvider` reads public ticker/OHLCV/orderbook data and does not
+  require exchange trading credentials.
+- `PaperBroker` owns local orders, balances, positions, fills, margin, and PnL.
+- `BrokerExchangeAdapter` implements the existing `BaseExchange` surface so
+  `buy`, `sell`, `RiskGate`, `OrderExecutor`, and existing strategies can keep
+  calling the same methods while the backing state is now SQLite-backed.
+
+The first contract model is intentionally narrow: USDT linear isolated-margin
+paper contracts only. Funding fees, exchange liquidation, and live contract
+execution are not implemented here.
+
+### P1 — Bot allocation and paper audit
+`bot_allocations` is the paper bot wallet. On first paper daemon startup, the
+active default bot gets `INITIAL_BALANCE_USDT`; existing rows are never reset on
+restart. Spot buys/sells update asset balances. Swap opens move USDT from
+`free` to `used` as margin; reduce-only closes release margin and apply realized
+PnL.
+
+`paper_orders` and `paper_fills` carry `actor_type`, `actor_id`, `bot_id`, and
+`trading_account_id`, so a direct session trade, a strategy fill, and a future
+scheduled LLM trader job can be audited without guessing from daemon-global
+state.
 
 ## Deferred (explicitly NOT implemented yet)
 

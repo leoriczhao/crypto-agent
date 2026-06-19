@@ -53,6 +53,14 @@ class CryptoDaemon {
     // Restore user-driven soul / exchange choices before any fast-path setup
     this.restoreDaemonState();
     this.activeIdentity = this.ensureDefaultIdentity();
+    if (config.paperTrading) {
+      this.agent.configurePaperBroker({
+        memory: this.memory,
+        identity: this.activeIdentity,
+        initialBalance: config.initialBalance,
+        httpsProxy: config.httpsProxy,
+      });
+    }
 
     this.strategyStore = new StrategyManager(this.memory);
     this.agent.strategyStore = this.strategyStore;
@@ -588,6 +596,9 @@ class CryptoDaemon {
       snapshot = await buildWorldSnapshot(this.agent.exchange, {
         paperTrading: config.paperTrading,
         strategyStore: this.strategyStore,
+        memory: this.memory,
+        broker: this.agent.broker,
+        sessionId: this.userSessionId,
       });
     } catch {}
     return {
@@ -756,12 +767,21 @@ class CryptoDaemon {
       const dueJobs = this.memory.getDueCronJobs();
       for (const job of dueJobs) {
         try {
+          const traderJob = this.memory.getLlmTraderJobByCronJobId(job.id);
+          if (traderJob && !traderJob.enabled) continue;
+          const runSessionId = traderJob?.sessionId ?? this.systemSessionId;
+          const runPrompt = traderJob?.prompt ?? `[CRON] Execute scheduled task: ${job.description}`;
+          if (traderJob && !this.agent.sessions.has(runSessionId)) {
+            const session = this.agent.sessions.create(`LLM trader #${traderJob.id}`, "system", runSessionId);
+            const messages = this.memory.loadRecentMessages(runSessionId, 20);
+            if (messages.length) session.messages = messages;
+          }
           const response = await this.agent.chatInSession(
-            this.systemSessionId,
-            `[CRON] Execute scheduled task: ${job.description}`,
+            runSessionId,
+            runPrompt,
           );
-          this.memory.saveMessage(this.systemSessionId, "user", `[CRON] ${job.description}`);
-          this.memory.saveMessage(this.systemSessionId, "assistant", response);
+          this.memory.saveMessage(runSessionId, "user", traderJob ? `[LLM_TRADER_JOB] ${traderJob.prompt}` : `[CRON] ${job.description}`);
+          this.memory.saveMessage(runSessionId, "assistant", response);
           const interval = parseInt(job.cron_expr.replace("every_", "").replace("m", ""), 10);
           const nextRun = new Date(Date.now() + interval * 60_000).toISOString();
           this.memory.updateCronNextRun(job.id, nextRun);

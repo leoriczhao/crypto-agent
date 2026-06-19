@@ -1,0 +1,27 @@
+services:
+  crypto-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-agent:latest
+    container_name: crypto-agent
+    restart: unless-stopped
+    user: "${CRYPTO_AGENT_UID:-1000}:${CRYPTO_AGENT_GID:-1000}"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      MEMORY_DB_PATH: /data/crypto_agent.db
+      AUTO_COMPACT_TRANSCRIPT_DIR: /data/transcripts
+      CRYPTO_AGENT_RUNTIME_DIR: /run/crypto-agent
+      CRYPTO_AGENT_SOCK: /run/crypto-agent/crypto-agent.sock
+      CRYPTO_AGENT_PID: /run/crypto-agent/crypto-agent.pid
+    volumes:
+      - ./data:/data
+      - ./runtime:/run/crypto-agent
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/crypto-agent/crypto-agent.sock && test -f /run/crypto-agent/crypto-agent.pid"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

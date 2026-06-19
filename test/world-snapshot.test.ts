@@ -17,6 +17,35 @@ describe("buildWorldSnapshot", () => {
     expect(result).toContain("$8,000.00");
   });
 
+  test("includes active bot allocation and open order count", async () => {
+    const memory = {
+      getSessionBinding: vi.fn().mockReturnValue({ botId: "bot-1", tradingAccountId: "acct-1" }),
+      getBotAllocation: vi.fn().mockReturnValue({
+        allocated: 2000,
+        free: 1500,
+        used: 500,
+        realizedPnl: 12.5,
+      }),
+    };
+    const broker = {
+      fetchOpenOrders: vi.fn().mockResolvedValue([
+        { id: "o1", symbol: "BTC/USDT", side: "buy", amount: 0.01 },
+      ]),
+    };
+
+    const result = await buildWorldSnapshot(makeMockExchange(), {
+      paperTrading: true,
+      memory: memory as any,
+      broker: broker as any,
+      sessionId: "session-1",
+    });
+
+    expect(result).toContain("Bot: bot-1");
+    expect(result).toContain("allocation $2,000.00");
+    expect(result).toContain("free $1,500.00");
+    expect(result).toContain("Open orders: 1");
+  });
+
   test("shows LIVE mode", async () => {
     const result = await buildWorldSnapshot(makeMockExchange(), { paperTrading: false });
     expect(result).toContain("LIVE");

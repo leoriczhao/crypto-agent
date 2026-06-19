@@ -57,6 +57,123 @@ export interface TradingBotRow {
   updatedAt: string;
 }
 
+export interface BotAllocationRow {
+  id: string;
+  botId: string;
+  tradingAccountId: string;
+  asset: string;
+  allocated: number;
+  free: number;
+  used: number;
+  realizedPnl: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaperOrderRow {
+  id: string;
+  tradingAccountId: string;
+  botId: string;
+  actorType: string;
+  actorId: string | null;
+  symbol: string;
+  marketType: "spot" | "swap";
+  side: string;
+  positionSide: "long" | "short" | null;
+  orderType: "market" | "limit";
+  amount: number;
+  price: number | null;
+  leverage: number | null;
+  reduceOnly: boolean;
+  status: string;
+  createdAt: string;
+  filledAt: string | null;
+}
+
+export interface PaperOrderInsert {
+  id: string;
+  tradingAccountId: string;
+  botId: string;
+  actorType: string;
+  actorId?: string | null;
+  symbol: string;
+  marketType: "spot" | "swap";
+  side: string;
+  positionSide?: "long" | "short" | null;
+  orderType: "market" | "limit";
+  amount: number;
+  price?: number | null;
+  leverage?: number | null;
+  reduceOnly?: boolean;
+  status: string;
+  filledAt?: string | null;
+}
+
+export interface PaperPositionRow {
+  id: string;
+  tradingAccountId: string;
+  botId: string;
+  symbol: string;
+  marketType: "spot" | "swap";
+  positionSide: "long" | "short";
+  amount: number;
+  avgEntryPrice: number;
+  markPrice: number;
+  leverage: number;
+  marginUsdt: number;
+  unrealizedPnl: number;
+  realizedPnl: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PaperFillRow {
+  id: number;
+  orderId: string;
+  tradingAccountId: string;
+  botId: string;
+  actorType: string;
+  actorId: string | null;
+  symbol: string;
+  marketType: "spot" | "swap";
+  side: string;
+  positionSide: "long" | "short" | null;
+  amount: number;
+  price: number;
+  feeUsdt: number;
+  realizedPnl: number;
+  createdAt: string;
+}
+
+export interface PaperFillInsert {
+  orderId: string;
+  tradingAccountId: string;
+  botId: string;
+  actorType: string;
+  actorId?: string | null;
+  symbol: string;
+  marketType: "spot" | "swap";
+  side: string;
+  positionSide?: "long" | "short" | null;
+  amount: number;
+  price: number;
+  feeUsdt?: number;
+  realizedPnl?: number;
+}
+
+export interface LlmTraderJobRow {
+  id: number;
+  cronJobId: number;
+  botId: string;
+  tradingAccountId: string;
+  sessionId: string;
+  prompt: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DefaultIdentity {
   fundingAccount: FundingAccountRow;
   tradingAccount: TradingAccountRow;
@@ -325,6 +442,88 @@ export class Memory {
         failure_reason TEXT,
         rule_id TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS bot_allocations (
+        id TEXT PRIMARY KEY,
+        bot_id TEXT NOT NULL,
+        trading_account_id TEXT NOT NULL,
+        asset TEXT NOT NULL DEFAULT 'USDT',
+        allocated REAL NOT NULL,
+        free REAL NOT NULL,
+        used REAL NOT NULL DEFAULT 0,
+        realized_pnl REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS paper_orders (
+        id TEXT PRIMARY KEY,
+        trading_account_id TEXT NOT NULL,
+        bot_id TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT,
+        symbol TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        side TEXT NOT NULL,
+        position_side TEXT,
+        order_type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        price REAL,
+        leverage REAL,
+        reduce_only INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        filled_at TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS paper_positions (
+        id TEXT PRIMARY KEY,
+        trading_account_id TEXT NOT NULL,
+        bot_id TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        position_side TEXT NOT NULL,
+        amount REAL NOT NULL,
+        avg_entry_price REAL NOT NULL,
+        mark_price REAL NOT NULL,
+        leverage REAL NOT NULL DEFAULT 1,
+        margin_usdt REAL NOT NULL DEFAULT 0,
+        unrealized_pnl REAL NOT NULL DEFAULT 0,
+        realized_pnl REAL NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS paper_fills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id TEXT NOT NULL,
+        trading_account_id TEXT NOT NULL,
+        bot_id TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT,
+        symbol TEXT NOT NULL,
+        market_type TEXT NOT NULL,
+        side TEXT NOT NULL,
+        position_side TEXT,
+        amount REAL NOT NULL,
+        price REAL NOT NULL,
+        fee_usdt REAL NOT NULL DEFAULT 0,
+        realized_pnl REAL NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS llm_trader_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cron_job_id INTEGER NOT NULL,
+        bot_id TEXT NOT NULL,
+        trading_account_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
   }
@@ -828,6 +1027,10 @@ export class Memory {
     this.db.prepare("DELETE FROM cron_jobs WHERE id = ?").run(jobId);
   }
 
+  setCronJobEnabled(jobId: number, enabled: boolean): void {
+    this.db.prepare("UPDATE cron_jobs SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, jobId);
+  }
+
   // --- Events ---
 
   logEvent(eventType: string, data = ""): void {
@@ -1172,6 +1375,399 @@ export class Memory {
 
   deleteDaemonState(key: string): void {
     this.db.prepare("DELETE FROM daemon_state WHERE key = ?").run(key);
+  }
+
+  // --- Paper broker persistence ---
+
+  private paperAllocationId(botId: string, tradingAccountId: string, asset: string): string {
+    return `${tradingAccountId}:${botId}:${asset.toUpperCase()}`;
+  }
+
+  private rowToBotAllocation(r: any): BotAllocationRow {
+    return {
+      id: r.id,
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
+      asset: r.asset,
+      allocated: r.allocated,
+      free: r.free,
+      used: r.used,
+      realizedPnl: r.realized_pnl,
+      status: r.status,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  ensureBotAllocation(input: { botId: string; tradingAccountId: string; asset: string; amount: number }): BotAllocationRow {
+    const asset = input.asset.toUpperCase();
+    const id = this.paperAllocationId(input.botId, input.tradingAccountId, asset);
+    this.db
+      .prepare(
+        `INSERT INTO bot_allocations
+         (id, bot_id, trading_account_id, asset, allocated, free, used, realized_pnl, status)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active')
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .run(id, input.botId, input.tradingAccountId, asset, input.amount, input.amount);
+    return this.getBotAllocation(input.botId, input.tradingAccountId, asset)!;
+  }
+
+  getBotAllocation(botId: string, tradingAccountId: string, asset: string): BotAllocationRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM bot_allocations WHERE id = ?")
+      .get(this.paperAllocationId(botId, tradingAccountId, asset)) as any | undefined;
+    return row ? this.rowToBotAllocation(row) : null;
+  }
+
+  listBotAllocations(input: { tradingAccountId: string; botId?: string }): BotAllocationRow[] {
+    const clauses = ["trading_account_id = ?"];
+    const values: any[] = [input.tradingAccountId];
+    if (input.botId) {
+      clauses.push("bot_id = ?");
+      values.push(input.botId);
+    }
+    const rows = this.db
+      .prepare(`SELECT * FROM bot_allocations WHERE ${clauses.join(" AND ")} ORDER BY asset ASC`)
+      .all(...values) as any[];
+    return rows.map((r) => this.rowToBotAllocation(r));
+  }
+
+  updateBotAllocation(input: {
+    botId: string;
+    tradingAccountId: string;
+    asset: string;
+    freeDelta?: number;
+    usedDelta?: number;
+    realizedPnlDelta?: number;
+  }): void {
+    const asset = input.asset.toUpperCase();
+    this.ensureBotAllocation({
+      botId: input.botId,
+      tradingAccountId: input.tradingAccountId,
+      asset,
+      amount: 0,
+    });
+    this.db
+      .prepare(
+        `UPDATE bot_allocations
+         SET
+           free = free + ?,
+           used = used + ?,
+           realized_pnl = realized_pnl + ?,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .run(
+        input.freeDelta ?? 0,
+        input.usedDelta ?? 0,
+        input.realizedPnlDelta ?? 0,
+        this.paperAllocationId(input.botId, input.tradingAccountId, asset),
+      );
+  }
+
+  createPaperOrder(input: PaperOrderInsert): PaperOrderRow {
+    this.db
+      .prepare(
+        `INSERT INTO paper_orders
+         (id, trading_account_id, bot_id, actor_type, actor_id, symbol, market_type, side, position_side, order_type, amount, price, leverage, reduce_only, status, filled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.tradingAccountId,
+        input.botId,
+        input.actorType,
+        input.actorId ?? null,
+        input.symbol,
+        input.marketType,
+        input.side,
+        input.positionSide ?? null,
+        input.orderType,
+        input.amount,
+        input.price ?? null,
+        input.leverage ?? null,
+        input.reduceOnly ? 1 : 0,
+        input.status,
+        input.filledAt ?? null,
+      );
+    return this.getPaperOrder(input.id)!;
+  }
+
+  getPaperOrder(id: string): PaperOrderRow | null {
+    const row = this.db.prepare("SELECT * FROM paper_orders WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToPaperOrder(row) : null;
+  }
+
+  updatePaperOrder(id: string, patch: { status?: string; filledAt?: string | null; price?: number | null }): void {
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (patch.status !== undefined) {
+      fields.push("status = ?");
+      values.push(patch.status);
+    }
+    if (patch.filledAt !== undefined) {
+      fields.push("filled_at = ?");
+      values.push(patch.filledAt);
+    }
+    if (patch.price !== undefined) {
+      fields.push("price = ?");
+      values.push(patch.price);
+    }
+    if (!fields.length) return;
+    values.push(id);
+    this.db.prepare(`UPDATE paper_orders SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+  }
+
+  listPaperOrders(input: { tradingAccountId: string; botId?: string; symbol?: string | null; status?: string }): PaperOrderRow[] {
+    const clauses = ["trading_account_id = ?"];
+    const values: any[] = [input.tradingAccountId];
+    if (input.botId) {
+      clauses.push("bot_id = ?");
+      values.push(input.botId);
+    }
+    if (input.symbol) {
+      clauses.push("symbol = ?");
+      values.push(input.symbol);
+    }
+    if (input.status) {
+      clauses.push("status = ?");
+      values.push(input.status);
+    }
+    const rows = this.db
+      .prepare(`SELECT * FROM paper_orders WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC, id ASC`)
+      .all(...values) as any[];
+    return rows.map((r) => this.rowToPaperOrder(r));
+  }
+
+  listPaperOpenOrders(input: { tradingAccountId: string; botId?: string; symbol?: string | null }): PaperOrderRow[] {
+    return this.listPaperOrders({ ...input, status: "open" });
+  }
+
+  private rowToPaperOrder(r: any): PaperOrderRow {
+    return {
+      id: r.id,
+      tradingAccountId: r.trading_account_id,
+      botId: r.bot_id,
+      actorType: r.actor_type,
+      actorId: r.actor_id,
+      symbol: r.symbol,
+      marketType: r.market_type,
+      side: r.side,
+      positionSide: r.position_side,
+      orderType: r.order_type,
+      amount: r.amount,
+      price: r.price,
+      leverage: r.leverage,
+      reduceOnly: Boolean(r.reduce_only),
+      status: r.status,
+      createdAt: r.created_at,
+      filledAt: r.filled_at,
+    };
+  }
+
+  upsertPaperPosition(input: PaperPositionRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO paper_positions
+         (id, trading_account_id, bot_id, symbol, market_type, position_side, amount, avg_entry_price, mark_price, leverage, margin_usdt, unrealized_pnl, realized_pnl)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           amount = excluded.amount,
+           avg_entry_price = excluded.avg_entry_price,
+           mark_price = excluded.mark_price,
+           leverage = excluded.leverage,
+           margin_usdt = excluded.margin_usdt,
+           unrealized_pnl = excluded.unrealized_pnl,
+           realized_pnl = excluded.realized_pnl,
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(
+        input.id,
+        input.tradingAccountId,
+        input.botId,
+        input.symbol,
+        input.marketType,
+        input.positionSide,
+        input.amount,
+        input.avgEntryPrice,
+        input.markPrice,
+        input.leverage,
+        input.marginUsdt,
+        input.unrealizedPnl,
+        input.realizedPnl,
+      );
+  }
+
+  deletePaperPosition(id: string): void {
+    this.db.prepare("DELETE FROM paper_positions WHERE id = ?").run(id);
+  }
+
+  listPaperPositions(input: { tradingAccountId: string; botId?: string; symbol?: string | null }): PaperPositionRow[] {
+    const clauses = ["trading_account_id = ?"];
+    const values: any[] = [input.tradingAccountId];
+    if (input.botId) {
+      clauses.push("bot_id = ?");
+      values.push(input.botId);
+    }
+    if (input.symbol) {
+      clauses.push("symbol = ?");
+      values.push(input.symbol);
+    }
+    const rows = this.db
+      .prepare(`SELECT * FROM paper_positions WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC, id ASC`)
+      .all(...values) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      tradingAccountId: r.trading_account_id,
+      botId: r.bot_id,
+      symbol: r.symbol,
+      marketType: r.market_type,
+      positionSide: r.position_side,
+      amount: r.amount,
+      avgEntryPrice: r.avg_entry_price,
+      markPrice: r.mark_price,
+      leverage: r.leverage,
+      marginUsdt: r.margin_usdt,
+      unrealizedPnl: r.unrealized_pnl,
+      realizedPnl: r.realized_pnl,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  insertPaperFill(input: PaperFillInsert): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO paper_fills
+         (order_id, trading_account_id, bot_id, actor_type, actor_id, symbol, market_type, side, position_side, amount, price, fee_usdt, realized_pnl)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.orderId,
+        input.tradingAccountId,
+        input.botId,
+        input.actorType,
+        input.actorId ?? null,
+        input.symbol,
+        input.marketType,
+        input.side,
+        input.positionSide ?? null,
+        input.amount,
+        input.price,
+        input.feeUsdt ?? 0,
+        input.realizedPnl ?? 0,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  listPaperFills(input: { orderId?: string; tradingAccountId?: string; botId?: string } = {}): PaperFillRow[] {
+    const clauses: string[] = [];
+    const values: any[] = [];
+    if (input.orderId) {
+      clauses.push("order_id = ?");
+      values.push(input.orderId);
+    }
+    if (input.tradingAccountId) {
+      clauses.push("trading_account_id = ?");
+      values.push(input.tradingAccountId);
+    }
+    if (input.botId) {
+      clauses.push("bot_id = ?");
+      values.push(input.botId);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM paper_fills ${where} ORDER BY id ASC`)
+      .all(...values) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      orderId: r.order_id,
+      tradingAccountId: r.trading_account_id,
+      botId: r.bot_id,
+      actorType: r.actor_type,
+      actorId: r.actor_id,
+      symbol: r.symbol,
+      marketType: r.market_type,
+      side: r.side,
+      positionSide: r.position_side,
+      amount: r.amount,
+      price: r.price,
+      feeUsdt: r.fee_usdt,
+      realizedPnl: r.realized_pnl,
+      createdAt: r.created_at,
+    }));
+  }
+
+  // --- LLM trader jobs ---
+
+  createLlmTraderJob(input: {
+    cronJobId: number;
+    botId: string;
+    tradingAccountId: string;
+    sessionId: string;
+    prompt: string;
+  }): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO llm_trader_jobs
+         (cron_job_id, bot_id, trading_account_id, session_id, prompt, enabled)
+         VALUES (?, ?, ?, ?, ?, 1)`,
+      )
+      .run(input.cronJobId, input.botId, input.tradingAccountId, input.sessionId, input.prompt);
+    return Number(result.lastInsertRowid);
+  }
+
+  getLlmTraderJob(id: number): LlmTraderJobRow | null {
+    const row = this.db.prepare("SELECT * FROM llm_trader_jobs WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToLlmTraderJob(row) : null;
+  }
+
+  getLlmTraderJobByCronJobId(cronJobId: number): LlmTraderJobRow | null {
+    const row = this.db.prepare("SELECT * FROM llm_trader_jobs WHERE cron_job_id = ?").get(cronJobId) as any | undefined;
+    return row ? this.rowToLlmTraderJob(row) : null;
+  }
+
+  getLlmTraderJobBySessionId(sessionId: string): LlmTraderJobRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM llm_trader_jobs WHERE session_id = ? ORDER BY id DESC LIMIT 1")
+      .get(sessionId) as any | undefined;
+    return row ? this.rowToLlmTraderJob(row) : null;
+  }
+
+  listLlmTraderJobs(): LlmTraderJobRow[] {
+    const rows = this.db.prepare("SELECT * FROM llm_trader_jobs ORDER BY id ASC").all() as any[];
+    return rows.map((r) => this.rowToLlmTraderJob(r));
+  }
+
+  setLlmTraderJobEnabled(id: number, enabled: boolean): void {
+    const job = this.getLlmTraderJob(id);
+    if (!job) throw new Error(`LLM trader job not found: ${id}`);
+    this.db
+      .prepare("UPDATE llm_trader_jobs SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(enabled ? 1 : 0, id);
+    this.setCronJobEnabled(job.cronJobId, enabled);
+  }
+
+  deleteLlmTraderJob(id: number): void {
+    const job = this.getLlmTraderJob(id);
+    if (!job) return;
+    this.db.prepare("DELETE FROM llm_trader_jobs WHERE id = ?").run(id);
+    this.deleteCronJob(job.cronJobId);
+  }
+
+  private rowToLlmTraderJob(r: any): LlmTraderJobRow {
+    return {
+      id: r.id,
+      cronJobId: r.cron_job_id,
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
+      sessionId: r.session_id,
+      prompt: r.prompt,
+      enabled: Boolean(r.enabled),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
   }
 
   // --- C0: Strategist research KB ---

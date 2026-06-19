@@ -365,3 +365,103 @@ describe("B0 — daemon_state KV", () => {
     reopened.close();
   });
 });
+
+describe("Paper broker persistence", () => {
+  test("seeds bot allocation once and does not reset on reopen", () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const first = memory.ensureBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      amount: 2000,
+    });
+    expect(first.free).toBe(2000);
+
+    memory.updateBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      freeDelta: -100,
+      usedDelta: 100,
+    });
+    memory.close();
+
+    const reopened = new Memory(dbPath);
+    const second = reopened.ensureBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      amount: 2000,
+    });
+    expect(second.free).toBe(1900);
+    expect(second.used).toBe(100);
+    reopened.close();
+  });
+
+  test("persists paper orders, positions, and fills with actor attribution", () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const order = memory.createPaperOrder({
+      id: "paper-1",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      actorType: "session",
+      actorId: "s1",
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      side: "buy",
+      positionSide: "long",
+      orderType: "market",
+      amount: 0.004,
+      price: 50000,
+      leverage: 5,
+      reduceOnly: false,
+      status: "filled",
+      filledAt: "2026-06-20T00:00:00.000Z",
+    });
+    expect(order.id).toBe("paper-1");
+
+    memory.upsertPaperPosition({
+      id: "default-bot:BTC/USDT:USDT:long",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      positionSide: "long",
+      amount: 0.004,
+      avgEntryPrice: 50000,
+      markPrice: 50000,
+      leverage: 5,
+      marginUsdt: 40,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+    });
+    memory.insertPaperFill({
+      orderId: "paper-1",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      actorType: "session",
+      actorId: "s1",
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      side: "buy",
+      positionSide: "long",
+      amount: 0.004,
+      price: 50000,
+      feeUsdt: 0,
+      realizedPnl: 0,
+    });
+
+    expect(memory.listPaperOrders({ tradingAccountId: identity.tradingAccount.id })).toHaveLength(1);
+    expect(memory.listPaperPositions({ tradingAccountId: identity.tradingAccount.id })[0]).toMatchObject({
+      symbol: "BTC/USDT:USDT",
+      positionSide: "long",
+      marginUsdt: 40,
+    });
+    expect(memory.listPaperFills({ orderId: "paper-1" })[0]).toMatchObject({
+      actorType: "session",
+      actorId: "s1",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+    });
+  });
+});

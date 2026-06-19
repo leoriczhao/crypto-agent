@@ -1,4 +1,5 @@
 import { registerTool } from "./registry.js";
+import { checkBotFreeUsdt } from "./trading-context.js";
 
 registerTool(
   "plan_ladder_strategy",
@@ -36,9 +37,11 @@ registerTool(
     },
     required: ["symbol", "side", "levels", "take_profit_pct", "allocated_usdt"],
   },
-  ["strategy_store"],
+  ["strategy_store", "memory", "sessionId"],
   async ({
     strategy_store,
+    memory,
+    sessionId,
     symbol,
     side,
     levels,
@@ -57,6 +60,8 @@ registerTool(
       if (allocated_usdt < totalSize) {
         return `Error: allocated_usdt ($${allocated_usdt}) must be >= sum(levels.sizeUsdt) = $${totalSize.toFixed(2)}.`;
       }
+      const botAllocationError = checkBotFreeUsdt(memory, sessionId, allocated_usdt);
+      if (botAllocationError) return botAllocationError;
 
       // Sanity: for long, levels should be sorted descending; for short, ascending.
       // Don't reject — warn in the response if violated, since the LLM may have its reasons.

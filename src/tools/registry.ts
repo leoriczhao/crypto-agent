@@ -11,6 +11,7 @@ export type ToolDep =
   | "sessionId"
   | "soul"
   | "exchange_manager"
+  | "broker"
   | "agent"
   | "skill_loader"
   | "strategy_store";

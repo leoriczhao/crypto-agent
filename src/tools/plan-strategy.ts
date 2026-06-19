@@ -1,4 +1,5 @@
 import { registerTool } from "./registry.js";
+import { checkBotFreeUsdt } from "./trading-context.js";
 
 registerTool(
   "plan_strategy",
@@ -57,9 +58,11 @@ registerTool(
     },
     required: ["symbol", "timeframe", "side", "entry", "exit", "position_size_usdt", "allocated_usdt", "stop_loss_pct", "take_profit_pct"],
   },
-  ["strategy_store"],
+  ["strategy_store", "memory", "sessionId"],
   async ({
     strategy_store,
+    memory,
+    sessionId,
     kind = "signal",
     symbol,
     timeframe,
@@ -80,6 +83,8 @@ registerTool(
       if (allocated_usdt == null || allocated_usdt < position_size_usdt) {
         return `Error: allocated_usdt ($${allocated_usdt}) must be >= position_size_usdt ($${position_size_usdt}). Typical default: position_size_usdt × 5.`;
       }
+      const botAllocationError = checkBotFreeUsdt(memory, sessionId, allocated_usdt);
+      if (botAllocationError) return botAllocationError;
       const strat = strategy_store.addStrategy({
         kind: "signal",
         symbol,

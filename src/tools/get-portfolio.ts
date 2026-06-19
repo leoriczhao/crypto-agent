@@ -1,14 +1,30 @@
 import { registerTool } from "./registry.js";
+import { resolveToolTradingContext } from "./trading-context.js";
+
+function formatUsdt(value: number): string {
+  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 registerTool(
   "get_portfolio",
   "Get complete portfolio overview: asset balances, open positions with PnL, and open orders.",
   { type: "object", properties: {} },
-  ["exchange"],
-  async ({ exchange }) => {
+  ["exchange", "broker", "memory", "sessionId"],
+  async ({ exchange, broker, memory, sessionId }) => {
     try {
       const lines: string[] = [];
-      const balance = await exchange.fetchBalance();
+      const ctx = memory ? resolveToolTradingContext(memory, sessionId) : null;
+      const allocation = ctx ? memory?.getBotAllocation?.(ctx.botId, ctx.tradingAccountId, "USDT") : null;
+      const balance = broker && ctx ? await broker.fetchBalance(ctx.botId) : await exchange.fetchBalance();
+
+      if (ctx && allocation) {
+        lines.push(`Active Bot: ${ctx.botId} (${ctx.tradingAccountId})`);
+        lines.push(
+          `Allocation USDT: allocated ${formatUsdt(allocation.allocated)} | free ${formatUsdt(allocation.free)} | used ${formatUsdt(allocation.used)} | realized PnL ${formatUsdt(allocation.realizedPnl ?? 0)}`,
+        );
+        lines.push("");
+      }
+
       if (Object.keys(balance).length) {
         lines.push("Asset     | Free         | Total");
         lines.push("-".repeat(40));
@@ -21,7 +37,7 @@ registerTool(
       }
       lines.push("");
 
-      const positions = await exchange.fetchPositions();
+      const positions = broker && ctx ? await broker.fetchPositions(ctx.botId) : await exchange.fetchPositions();
       if (Object.keys(positions).length) {
         lines.push("Symbol           | Side   | Size         | Entry        | Mark         | PnL");
         lines.push("-".repeat(85));
@@ -48,7 +64,7 @@ registerTool(
           lines.push(JSON.stringify(orders, null, 2));
         }
       } else {
-        const openOrders = await exchange.fetchOpenOrders();
+        const openOrders = broker && ctx ? await broker.fetchOpenOrders(null, ctx.botId) : await exchange.fetchOpenOrders();
         if (openOrders.length) {
           lines.push("Open Orders:");
           lines.push(JSON.stringify(openOrders, null, 2));

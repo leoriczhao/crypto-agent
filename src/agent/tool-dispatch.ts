@@ -5,6 +5,7 @@ import type { ExchangeManager } from "../exchange/manager.js";
 import type { Memory } from "../memory.js";
 import type { SkillLoader } from "../skill-loader.js";
 import type { StrategyManager } from "../strategy/manager.js";
+import type { Broker } from "../broker/types.js";
 
 export interface AgentToolDeps {
   getExchange: () => unknown;
@@ -13,6 +14,7 @@ export interface AgentToolDeps {
   getSessionId: () => string;
   getSoul: () => unknown;
   getExchangeManager: () => ExchangeManager;
+  getBroker: () => Broker | null;
   getAgent: () => CryptoAgent;
   getSkillLoader: () => SkillLoader;
   getStrategyStore: () => StrategyManager | null;
@@ -33,6 +35,7 @@ export async function dispatchAgentTool(
     sessionId: deps.getSessionId,
     soul: deps.getSoul,
     exchange_manager: deps.getExchangeManager,
+    broker: deps.getBroker,
     agent: deps.getAgent,
     skill_loader: deps.getSkillLoader,
     strategy_store: deps.getStrategyStore,

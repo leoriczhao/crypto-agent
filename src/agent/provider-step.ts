@@ -107,6 +107,23 @@ export async function runOpenaiStep(opts: {
 }): Promise<ProviderStepResult> {
   const callbacks = opts.callbacks ?? {};
   throwIfCancelled(callbacks.signal);
+  if (String(opts.config.apiBaseUrl ?? "").includes("api.deepseek.com")) {
+    const response = await opts.client.chat.completions.create({
+      messages: [{ role: "system", content: opts.systemPrompt }, ...opts.messages],
+      tools: openaiTools(),
+      stream: false,
+      ...openaiChatCompletionKwargs(opts.config),
+    }, { signal: callbacks.signal });
+    throwIfCancelled(callbacks.signal);
+    const msg = response.choices?.[0]?.message ?? {};
+    const text = typeof msg.content === "string" ? msg.content : "";
+    if (text) callbacks.onDelta?.(text);
+    const message: AgentAssistantMessage = msg.tool_calls?.length
+      ? { role: "assistant", content: text || null, tool_calls: msg.tool_calls }
+      : { role: "assistant", content: text };
+    return { message, text };
+  }
+
   const stream = await opts.client.chat.completions.create({
     messages: [{ role: "system", content: opts.systemPrompt }, ...opts.messages],
     tools: openaiTools(),
