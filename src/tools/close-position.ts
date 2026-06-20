@@ -56,6 +56,9 @@ registerTool(
               reduceOnly: true,
               actorType: ctx.actorType,
               actorId: ctx.actorId,
+              agentRunId: ctx.agentRunId,
+              mandateId: ctx.mandateId,
+              capitalAllocationId: ctx.capitalAllocationId,
               botId: ctx.botId,
               tradingAccountId: ctx.tradingAccountId,
             });
@@ -87,6 +90,9 @@ registerTool(
         order_type,
         mode,
         reasoning: `[Contract] close ${side}`,
+        agentRunId: ctx.agentRunId,
+        mandateId: ctx.mandateId,
+        capitalAllocationId: ctx.capitalAllocationId,
         botId: ctx.botId,
         tradingAccountId: ctx.tradingAccountId,
       });

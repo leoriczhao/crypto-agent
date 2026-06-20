@@ -5,7 +5,7 @@ export type BrokerSide = "buy" | "sell";
 export type BrokerOrderType = "market" | "limit";
 export type BrokerOrderStatus = "open" | "filled" | "cancelled" | "rejected" | "unknown";
 export type BrokerPositionSide = "long" | "short";
-export type BrokerActorType = "session" | "strategy" | "llm_trader" | "system";
+export type BrokerActorType = "session" | "strategy" | "resident_agent" | "system";
 
 export interface BrokerOrderRequest {
   symbol: string;
@@ -20,6 +20,9 @@ export interface BrokerOrderRequest {
   reduceOnly?: boolean;
   actorType: BrokerActorType;
   actorId?: string | null;
+  agentRunId?: string | null;
+  mandateId?: string | null;
+  capitalAllocationId?: string | null;
   botId: string;
   tradingAccountId: string;
 }

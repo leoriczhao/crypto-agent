@@ -17,6 +17,9 @@ export interface TradeRow {
   id: number;
   session_id: string;
   strategy_id: string | null;
+  agentRunId: string | null;
+  mandateId: string | null;
+  capitalAllocationId: string | null;
   symbol: string;
   side: string;
   amount: number;
@@ -77,6 +80,9 @@ export interface PaperOrderRow {
   botId: string;
   actorType: string;
   actorId: string | null;
+  agentRunId: string | null;
+  mandateId: string | null;
+  capitalAllocationId: string | null;
   symbol: string;
   marketType: "spot" | "swap";
   side: string;
@@ -97,6 +103,9 @@ export interface PaperOrderInsert {
   botId: string;
   actorType: string;
   actorId?: string | null;
+  agentRunId?: string | null;
+  mandateId?: string | null;
+  capitalAllocationId?: string | null;
   symbol: string;
   marketType: "spot" | "swap";
   side: string;
@@ -135,6 +144,9 @@ export interface PaperFillRow {
   botId: string;
   actorType: string;
   actorId: string | null;
+  agentRunId: string | null;
+  mandateId: string | null;
+  capitalAllocationId: string | null;
   symbol: string;
   marketType: "spot" | "swap";
   side: string;
@@ -152,6 +164,9 @@ export interface PaperFillInsert {
   botId: string;
   actorType: string;
   actorId?: string | null;
+  agentRunId?: string | null;
+  mandateId?: string | null;
+  capitalAllocationId?: string | null;
   symbol: string;
   marketType: "spot" | "swap";
   side: string;
@@ -162,16 +177,66 @@ export interface PaperFillInsert {
   realizedPnl?: number;
 }
 
-export interface LlmTraderJobRow {
-  id: number;
-  cronJobId: number;
-  botId: string;
-  tradingAccountId: string;
-  sessionId: string;
-  prompt: string;
-  enabled: boolean;
+export type ResidentAgentType = "trader" | "researcher" | "risk_monitor" | "strategist";
+export type ResidentAgentStatus = "active" | "paused" | "archived";
+export type StrategyMandateStatus = "draft" | "active" | "deprecated";
+export type MandateValidationStatus = "deferred" | "pending" | "validated" | "rejected";
+export type AgentRunStatus = "running" | "completed" | "failed";
+
+export interface StrategyMandateRow {
+  id: string;
+  name: string;
+  version: number;
+  status: StrategyMandateStatus;
+  description: string;
+  body: Record<string, any>;
+  validationStatus: MandateValidationStatus;
+  validationNotes: string | null;
+  createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ResidentAgentRow {
+  id: string;
+  type: ResidentAgentType;
+  name: string;
+  status: ResidentAgentStatus;
+  sessionId: string;
+  botId: string;
+  tradingAccountId: string;
+  capitalAllocationId: string | null;
+  scheduleExpr: string | null;
+  nextRun: string | null;
+  mandate: string;
+  toolPolicy: string;
+  riskPolicy: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentMandateAssignmentRow {
+  id: number;
+  agentId: string;
+  mandateId: string;
+  universe: string[];
+  priority: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentRunRow {
+  id: string;
+  agentId: string;
+  trigger: string;
+  status: AgentRunStatus;
+  input: string | null;
+  summary: string | null;
+  error: string | null;
+  mandateIds: string[];
+  startedAt: string;
+  finishedAt: string | null;
 }
 
 export interface DefaultIdentity {
@@ -303,6 +368,9 @@ export class Memory {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT,
         strategy_id TEXT,
+        agent_run_id TEXT,
+        mandate_id TEXT,
+        capital_allocation_id TEXT,
         symbol TEXT NOT NULL,
         side TEXT NOT NULL,
         amount REAL NOT NULL,
@@ -456,6 +524,9 @@ export class Memory {
         bot_id TEXT NOT NULL,
         actor_type TEXT NOT NULL,
         actor_id TEXT,
+        agent_run_id TEXT,
+        mandate_id TEXT,
+        capital_allocation_id TEXT,
         symbol TEXT NOT NULL,
         market_type TEXT NOT NULL,
         side TEXT NOT NULL,
@@ -495,6 +566,9 @@ export class Memory {
         bot_id TEXT NOT NULL,
         actor_type TEXT NOT NULL,
         actor_id TEXT,
+        agent_run_id TEXT,
+        mandate_id TEXT,
+        capital_allocation_id TEXT,
         symbol TEXT NOT NULL,
         market_type TEXT NOT NULL,
         side TEXT NOT NULL,
@@ -506,17 +580,79 @@ export class Memory {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
-      CREATE TABLE IF NOT EXISTS llm_trader_jobs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cron_job_id INTEGER NOT NULL,
-        bot_id TEXT NOT NULL,
-        trading_account_id TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        enabled INTEGER NOT NULL DEFAULT 1,
+      CREATE TABLE IF NOT EXISTS strategy_mandates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'draft',
+        description TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '{}',
+        validation_status TEXT NOT NULL DEFAULT 'deferred',
+        validation_notes TEXT,
+        created_by TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS resident_agents (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        session_id TEXT NOT NULL,
+        bot_id TEXT NOT NULL,
+        trading_account_id TEXT NOT NULL,
+        capital_allocation_id TEXT,
+        schedule_expr TEXT,
+        next_run TIMESTAMP,
+        mandate TEXT NOT NULL DEFAULT '',
+        tool_policy TEXT NOT NULL DEFAULT '',
+        risk_policy TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES sessions(id),
+        FOREIGN KEY (bot_id) REFERENCES trading_bots(id),
+        FOREIGN KEY (trading_account_id) REFERENCES trading_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_mandate_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        mandate_id TEXT NOT NULL,
+        universe TEXT NOT NULL DEFAULT '[]',
+        priority INTEGER NOT NULL DEFAULT 100,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES resident_agents(id),
+        FOREIGN KEY (mandate_id) REFERENCES strategy_mandates(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        input TEXT,
+        summary TEXT,
+        error TEXT,
+        mandate_ids TEXT NOT NULL DEFAULT '[]',
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        finished_at TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES resident_agents(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        run_id TEXT,
+        event_type TEXT NOT NULL,
+        payload TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES resident_agents(id),
+        FOREIGN KEY (run_id) REFERENCES agent_runs(id)
+      );
+
     `);
   }
 
@@ -531,6 +667,15 @@ export class Memory {
 
   private tradingAccountIdOrDefault(tradingAccountId?: string | null): string | null {
     return tradingAccountId === undefined ? this.defaultTradingAccountId : tradingAccountId;
+  }
+
+  private parseJson<T>(value: string | null | undefined, fallback: T): T {
+    if (!value) return fallback;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
   }
 
   private rowToFundingAccount(r: any): FundingAccountRow {
@@ -642,6 +787,22 @@ export class Memory {
   getTradingBot(id: string): TradingBotRow | null {
     const row = this.db.prepare("SELECT * FROM trading_bots WHERE id = ?").get(id);
     return row ? this.rowToTradingBot(row) : null;
+  }
+
+  createTradingBot(input: {
+    id?: string;
+    tradingAccountId: string;
+    name: string;
+    status?: string;
+  }): TradingBotRow {
+    const id = input.id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO trading_bots (id, trading_account_id, name, status)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, input.tradingAccountId, input.name, input.status ?? "active");
+    return this.getTradingBot(id)!;
   }
 
   getDefaultBot(): TradingBotRow | null {
@@ -768,17 +929,23 @@ export class Memory {
       strategyId?: string | null;
       botId?: string | null;
       tradingAccountId?: string | null;
+      agentRunId?: string | null;
+      mandateId?: string | null;
+      capitalAllocationId?: string | null;
     },
   ): void {
     this.db
       .prepare(
         `INSERT INTO trades
-         (session_id, strategy_id, bot_id, trading_account_id, symbol, side, amount, price, order_type, mode, reasoning)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (session_id, strategy_id, agent_run_id, mandate_id, capital_allocation_id, bot_id, trading_account_id, symbol, side, amount, price, order_type, mode, reasoning)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         sessionId,
         data.strategyId ?? null,
+        data.agentRunId ?? null,
+        data.mandateId ?? null,
+        data.capitalAllocationId ?? null,
         this.botIdOrDefault(data.botId),
         this.tradingAccountIdOrDefault(data.tradingAccountId),
         data.symbol,
@@ -794,6 +961,9 @@ export class Memory {
   private rowToTrade(r: any): TradeRow {
     return {
       ...r,
+      agentRunId: r.agent_run_id ?? null,
+      mandateId: r.mandate_id ?? null,
+      capitalAllocationId: r.capital_allocation_id ?? null,
       botId: r.bot_id ?? null,
       tradingAccountId: r.trading_account_id ?? null,
     } as TradeRow;
@@ -1305,8 +1475,8 @@ export class Memory {
     this.db
       .prepare(
         `INSERT INTO paper_orders
-         (id, trading_account_id, bot_id, actor_type, actor_id, symbol, market_type, side, position_side, order_type, amount, price, leverage, reduce_only, status, filled_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, trading_account_id, bot_id, actor_type, actor_id, agent_run_id, mandate_id, capital_allocation_id, symbol, market_type, side, position_side, order_type, amount, price, leverage, reduce_only, status, filled_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.id,
@@ -1314,6 +1484,9 @@ export class Memory {
         input.botId,
         input.actorType,
         input.actorId ?? null,
+        input.agentRunId ?? null,
+        input.mandateId ?? null,
+        input.capitalAllocationId ?? null,
         input.symbol,
         input.marketType,
         input.side,
@@ -1386,6 +1559,9 @@ export class Memory {
       botId: r.bot_id,
       actorType: r.actor_type,
       actorId: r.actor_id,
+      agentRunId: r.agent_run_id ?? null,
+      mandateId: r.mandate_id ?? null,
+      capitalAllocationId: r.capital_allocation_id ?? null,
       symbol: r.symbol,
       marketType: r.market_type,
       side: r.side,
@@ -1475,8 +1651,8 @@ export class Memory {
     const result = this.db
       .prepare(
         `INSERT INTO paper_fills
-         (order_id, trading_account_id, bot_id, actor_type, actor_id, symbol, market_type, side, position_side, amount, price, fee_usdt, realized_pnl)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (order_id, trading_account_id, bot_id, actor_type, actor_id, agent_run_id, mandate_id, capital_allocation_id, symbol, market_type, side, position_side, amount, price, fee_usdt, realized_pnl)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.orderId,
@@ -1484,6 +1660,9 @@ export class Memory {
         input.botId,
         input.actorType,
         input.actorId ?? null,
+        input.agentRunId ?? null,
+        input.mandateId ?? null,
+        input.capitalAllocationId ?? null,
         input.symbol,
         input.marketType,
         input.side,
@@ -1522,6 +1701,9 @@ export class Memory {
       botId: r.bot_id,
       actorType: r.actor_type,
       actorId: r.actor_id,
+      agentRunId: r.agent_run_id ?? null,
+      mandateId: r.mandate_id ?? null,
+      capitalAllocationId: r.capital_allocation_id ?? null,
       symbol: r.symbol,
       marketType: r.market_type,
       side: r.side,
@@ -1534,75 +1716,309 @@ export class Memory {
     }));
   }
 
-  // --- LLM trader jobs ---
+  // --- Resident agents and strategy mandates ---
 
-  createLlmTraderJob(input: {
-    cronJobId: number;
-    botId: string;
-    tradingAccountId: string;
-    sessionId: string;
-    prompt: string;
-  }): number {
-    const result = this.db
-      .prepare(
-        `INSERT INTO llm_trader_jobs
-         (cron_job_id, bot_id, trading_account_id, session_id, prompt, enabled)
-         VALUES (?, ?, ?, ?, ?, 1)`,
-      )
-      .run(input.cronJobId, input.botId, input.tradingAccountId, input.sessionId, input.prompt);
-    return Number(result.lastInsertRowid);
-  }
-
-  getLlmTraderJob(id: number): LlmTraderJobRow | null {
-    const row = this.db.prepare("SELECT * FROM llm_trader_jobs WHERE id = ?").get(id) as any | undefined;
-    return row ? this.rowToLlmTraderJob(row) : null;
-  }
-
-  getLlmTraderJobByCronJobId(cronJobId: number): LlmTraderJobRow | null {
-    const row = this.db.prepare("SELECT * FROM llm_trader_jobs WHERE cron_job_id = ?").get(cronJobId) as any | undefined;
-    return row ? this.rowToLlmTraderJob(row) : null;
-  }
-
-  getLlmTraderJobBySessionId(sessionId: string): LlmTraderJobRow | null {
-    const row = this.db
-      .prepare("SELECT * FROM llm_trader_jobs WHERE session_id = ? ORDER BY id DESC LIMIT 1")
-      .get(sessionId) as any | undefined;
-    return row ? this.rowToLlmTraderJob(row) : null;
-  }
-
-  listLlmTraderJobs(): LlmTraderJobRow[] {
-    const rows = this.db.prepare("SELECT * FROM llm_trader_jobs ORDER BY id ASC").all() as any[];
-    return rows.map((r) => this.rowToLlmTraderJob(r));
-  }
-
-  setLlmTraderJobEnabled(id: number, enabled: boolean): void {
-    const job = this.getLlmTraderJob(id);
-    if (!job) throw new Error(`LLM trader job not found: ${id}`);
+  createStrategyMandate(input: {
+    id?: string;
+    name: string;
+    version?: number;
+    status?: StrategyMandateStatus;
+    description?: string;
+    body?: Record<string, any>;
+    validationStatus?: MandateValidationStatus;
+    validationNotes?: string | null;
+    createdBy?: string | null;
+  }): StrategyMandateRow {
+    const id = input.id ?? randomUUID();
     this.db
-      .prepare("UPDATE llm_trader_jobs SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(enabled ? 1 : 0, id);
-    this.setCronJobEnabled(job.cronJobId, enabled);
+      .prepare(
+        `INSERT INTO strategy_mandates
+         (id, name, version, status, description, body, validation_status, validation_notes, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.name,
+        input.version ?? 1,
+        input.status ?? "draft",
+        input.description ?? "",
+        JSON.stringify(input.body ?? {}),
+        input.validationStatus ?? "deferred",
+        input.validationNotes ?? null,
+        input.createdBy ?? null,
+      );
+    return this.getStrategyMandate(id)!;
   }
 
-  deleteLlmTraderJob(id: number): void {
-    const job = this.getLlmTraderJob(id);
-    if (!job) return;
-    this.db.prepare("DELETE FROM llm_trader_jobs WHERE id = ?").run(id);
-    this.deleteCronJob(job.cronJobId);
+  getStrategyMandate(id: string): StrategyMandateRow | null {
+    const row = this.db.prepare("SELECT * FROM strategy_mandates WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToStrategyMandate(row) : null;
   }
 
-  private rowToLlmTraderJob(r: any): LlmTraderJobRow {
+  listStrategyMandates(input: { status?: StrategyMandateStatus } = {}): StrategyMandateRow[] {
+    const rows = input.status
+      ? this.db.prepare("SELECT * FROM strategy_mandates WHERE status = ? ORDER BY created_at ASC").all(input.status)
+      : this.db.prepare("SELECT * FROM strategy_mandates ORDER BY created_at ASC").all();
+    return (rows as any[]).map((r) => this.rowToStrategyMandate(r));
+  }
+
+  setStrategyMandateStatus(id: string, status: StrategyMandateStatus): void {
+    this.db
+      .prepare("UPDATE strategy_mandates SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(status, id);
+  }
+
+  private rowToStrategyMandate(r: any): StrategyMandateRow {
     return {
       id: r.id,
-      cronJobId: r.cron_job_id,
-      botId: r.bot_id,
-      tradingAccountId: r.trading_account_id,
-      sessionId: r.session_id,
-      prompt: r.prompt,
-      enabled: Boolean(r.enabled),
+      name: r.name,
+      version: r.version,
+      status: r.status,
+      description: r.description,
+      body: this.parseJson<Record<string, any>>(r.body, {}),
+      validationStatus: r.validation_status,
+      validationNotes: r.validation_notes ?? null,
+      createdBy: r.created_by ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+  }
+
+  createResidentAgent(input: {
+    id?: string;
+    type: ResidentAgentType;
+    name: string;
+    status?: ResidentAgentStatus;
+    sessionId?: string;
+    botId: string;
+    tradingAccountId: string;
+    capitalAllocationId?: string | null;
+    scheduleExpr?: string | null;
+    nextRun?: string | null;
+    mandate?: string;
+    toolPolicy?: string;
+    riskPolicy?: Record<string, any>;
+  }): ResidentAgentRow {
+    const id = input.id ?? randomUUID();
+    const sessionId = input.sessionId ?? `resident-agent-${id}`;
+    this.createSession(sessionId, input.name, "system", input.botId);
+    this.db
+      .prepare(
+        `INSERT INTO resident_agents
+         (id, type, name, status, session_id, bot_id, trading_account_id, capital_allocation_id, schedule_expr, next_run, mandate, tool_policy, risk_policy)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.type,
+        input.name,
+        input.status ?? "active",
+        sessionId,
+        input.botId,
+        input.tradingAccountId,
+        input.capitalAllocationId ?? null,
+        input.scheduleExpr ?? null,
+        input.nextRun ?? null,
+        input.mandate ?? "",
+        input.toolPolicy ?? `${input.type}.v1`,
+        JSON.stringify(input.riskPolicy ?? {}),
+      );
+    return this.getResidentAgent(id)!;
+  }
+
+  getResidentAgent(id: string): ResidentAgentRow | null {
+    const row = this.db.prepare("SELECT * FROM resident_agents WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToResidentAgent(row) : null;
+  }
+
+  getResidentAgentBySessionId(sessionId: string): ResidentAgentRow | null {
+    const row = this.db.prepare("SELECT * FROM resident_agents WHERE session_id = ?").get(sessionId) as any | undefined;
+    return row ? this.rowToResidentAgent(row) : null;
+  }
+
+  listResidentAgents(input: { status?: ResidentAgentStatus; type?: ResidentAgentType } = {}): ResidentAgentRow[] {
+    const clauses: string[] = [];
+    const values: any[] = [];
+    if (input.status) {
+      clauses.push("status = ?");
+      values.push(input.status);
+    }
+    if (input.type) {
+      clauses.push("type = ?");
+      values.push(input.type);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM resident_agents ${where} ORDER BY created_at ASC`).all(...values) as any[];
+    return rows.map((r) => this.rowToResidentAgent(r));
+  }
+
+  setResidentAgentStatus(id: string, status: ResidentAgentStatus): void {
+    this.db
+      .prepare("UPDATE resident_agents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(status, id);
+  }
+
+  getDueResidentAgents(now: string = new Date().toISOString()): ResidentAgentRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM resident_agents
+         WHERE status = 'active' AND schedule_expr IS NOT NULL AND next_run IS NOT NULL AND next_run <= ?
+         ORDER BY next_run ASC`,
+      )
+      .all(now) as any[];
+    return rows.map((r) => this.rowToResidentAgent(r));
+  }
+
+  updateResidentAgentNextRun(id: string, nextRun: string): void {
+    this.db
+      .prepare("UPDATE resident_agents SET next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(nextRun, id);
+  }
+
+  private rowToResidentAgent(r: any): ResidentAgentRow {
+    return {
+      id: r.id,
+      type: r.type,
+      name: r.name,
+      status: r.status,
+      sessionId: r.session_id,
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
+      capitalAllocationId: r.capital_allocation_id ?? null,
+      scheduleExpr: r.schedule_expr ?? null,
+      nextRun: r.next_run ?? null,
+      mandate: r.mandate ?? "",
+      toolPolicy: r.tool_policy,
+      riskPolicy: this.parseJson<Record<string, any>>(r.risk_policy, {}),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  assignMandateToAgent(input: {
+    agentId: string;
+    mandateId: string;
+    universe?: string[];
+    priority?: number;
+    active?: boolean;
+  }): AgentMandateAssignmentRow {
+    const result = this.db
+      .prepare(
+        `INSERT INTO agent_mandate_assignments
+         (agent_id, mandate_id, universe, priority, active)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.agentId,
+        input.mandateId,
+        JSON.stringify(input.universe ?? []),
+        input.priority ?? 100,
+        input.active === false ? 0 : 1,
+      );
+    return this.getAgentMandateAssignment(Number(result.lastInsertRowid))!;
+  }
+
+  getAgentMandateAssignment(id: number): AgentMandateAssignmentRow | null {
+    const row = this.db.prepare("SELECT * FROM agent_mandate_assignments WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToAgentMandateAssignment(row) : null;
+  }
+
+  listAgentMandateAssignments(agentId: string, opts: { activeOnly?: boolean } = {}): AgentMandateAssignmentRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM agent_mandate_assignments
+         WHERE agent_id = ? ${opts.activeOnly ? "AND active = 1" : ""}
+         ORDER BY priority ASC, id ASC`,
+      )
+      .all(agentId) as any[];
+    return rows.map((r) => this.rowToAgentMandateAssignment(r));
+  }
+
+  private rowToAgentMandateAssignment(r: any): AgentMandateAssignmentRow {
+    return {
+      id: r.id,
+      agentId: r.agent_id,
+      mandateId: r.mandate_id,
+      universe: this.parseJson<string[]>(r.universe, []),
+      priority: r.priority,
+      active: Boolean(r.active),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  createAgentRun(input: {
+    id?: string;
+    agentId: string;
+    trigger: string;
+    input?: string | null;
+    mandateIds?: string[];
+  }): AgentRunRow {
+    const id = input.id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO agent_runs
+         (id, agent_id, trigger, status, input, mandate_ids)
+         VALUES (?, ?, ?, 'running', ?, ?)`,
+      )
+      .run(id, input.agentId, input.trigger, input.input ?? null, JSON.stringify(input.mandateIds ?? []));
+    return this.getAgentRun(id)!;
+  }
+
+  getAgentRun(id: string): AgentRunRow | null {
+    const row = this.db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToAgentRun(row) : null;
+  }
+
+  getActiveAgentRunBySessionId(sessionId: string): AgentRunRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT ar.* FROM agent_runs ar
+         JOIN resident_agents ra ON ra.id = ar.agent_id
+         WHERE ra.session_id = ? AND ar.status = 'running'
+         ORDER BY ar.started_at DESC LIMIT 1`,
+      )
+      .get(sessionId) as any | undefined;
+    return row ? this.rowToAgentRun(row) : null;
+  }
+
+  finishAgentRun(id: string, patch: { status: "completed" | "failed"; summary?: string | null; error?: string | null }): void {
+    this.db
+      .prepare(
+        `UPDATE agent_runs
+         SET status = ?, summary = ?, error = ?, finished_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+      )
+      .run(patch.status, patch.summary ?? null, patch.error ?? null, id);
+  }
+
+  listAgentRuns(agentId: string, limit = 20): AgentRunRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM agent_runs WHERE agent_id = ? ORDER BY started_at DESC LIMIT ?")
+      .all(agentId, limit) as any[];
+    return rows.map((r) => this.rowToAgentRun(r));
+  }
+
+  private rowToAgentRun(r: any): AgentRunRow {
+    return {
+      id: r.id,
+      agentId: r.agent_id,
+      trigger: r.trigger,
+      status: r.status,
+      input: r.input ?? null,
+      summary: r.summary ?? null,
+      error: r.error ?? null,
+      mandateIds: this.parseJson<string[]>(r.mandate_ids, []),
+      startedAt: r.started_at,
+      finishedAt: r.finished_at ?? null,
+    };
+  }
+
+  logAgentEvent(input: { agentId: string; runId?: string | null; type: string; payload?: Record<string, any> | null }): number {
+    const result = this.db
+      .prepare("INSERT INTO agent_events (agent_id, run_id, event_type, payload) VALUES (?, ?, ?, ?)")
+      .run(input.agentId, input.runId ?? null, input.type, input.payload ? JSON.stringify(input.payload) : null);
+    return Number(result.lastInsertRowid);
   }
 
   // --- C0: Strategist research KB ---

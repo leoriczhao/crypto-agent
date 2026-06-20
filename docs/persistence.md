@@ -42,6 +42,11 @@ API) is explicitly NOT persisted.
 | `paper_orders` | Local paper order book and filled/cancelled paper order history | `memory.ts` / `broker/paper-broker.ts` |
 | `paper_positions` | Local paper spot/swap positions, margin, mark price, and unrealized PnL | `memory.ts` / `broker/paper-broker.ts` |
 | `paper_fills` | Paper fill audit log with actor, bot, and trading-account attribution | `memory.ts` / `broker/paper-broker.ts` |
+| `strategy_mandates` | Reusable strategy playbooks plus validation status | `memory.ts` / `tools/strategy-mandate.ts` |
+| `resident_agents` | Long-lived autonomous agents bound to a bot, account, allocation, and schedule | `memory.ts` / `agents/runtime.ts` |
+| `agent_mandate_assignments` | Active mandate-to-agent bindings and trading universe | `memory.ts` |
+| `agent_runs` | Per-wake execution records for resident agents | `memory.ts` / `agents/runtime.ts` |
+| `agent_events` | Resident agent lifecycle/run audit events | `memory.ts` / `agents/runtime.ts` |
 
 ## Restart reconciliation flow
 
@@ -142,6 +147,25 @@ The strategist sub-agent records adopted, rejected, and pending hypotheses in
 `strategy_kb`, including failure reasons. This makes failed research reusable
 instead of letting the LLM repeat the same weak ideas.
 
+### R0 — Resident agents and strategy mandates
+Resident agents are long-lived autonomous actors, not one-off delegated
+subtasks. The main human-facing agent can create a resident trader through the
+`resident_agent` tool, but the created trader gets its own `trading_bots` row
+and `bot_allocations` USDT wallet under the active trading account. This keeps
+the mapping explicit:
+
+`funding_account -> trading_account -> trading_bot -> resident_agent -> session`
+
+Trading mandates are separate reusable resources in `strategy_mandates`.
+Resident traders can only run with active mandate assignments; the wake-up
+schedule only decides when to run, not what strategy to use. Each wake creates
+an `agent_runs` row before the LLM is called, and paper orders, fills, and trade
+logs carry `agent_run_id`, `mandate_id`, and `capital_allocation_id` for audit.
+
+Mandates also carry `validation_status` and `validation_notes`. Current code
+records whether validation is deferred, pending, validated, or rejected, but it
+does not yet enforce a full backtest approval gate.
+
 ### P0 — Persistent paper broker
 Paper mode now separates public market data from execution/accounting:
 
@@ -169,10 +193,10 @@ restart. Spot buys/sells update asset balances. Swap opens move USDT from
 `free` to `used` as margin; reduce-only closes release margin and apply realized
 PnL.
 
-`paper_orders` and `paper_fills` carry `actor_type`, `actor_id`, `bot_id`, and
-`trading_account_id`, so a direct session trade, a strategy fill, and a future
-scheduled LLM trader job can be audited without guessing from daemon-global
-state.
+`paper_orders` and `paper_fills` carry `actor_type`, `actor_id`, `bot_id`,
+`trading_account_id`, `agent_run_id`, `mandate_id`, and
+`capital_allocation_id`, so a direct session trade, a strategy fill, and a
+resident trader run can be audited without guessing from daemon-global state.
 
 ## Deferred (explicitly NOT implemented yet)
 
@@ -209,6 +233,27 @@ CREATE TABLE order_attempts (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+### R1 — Backtest approval platform for mandates
+**What**: A mandate validation platform that can take a researcher-created
+strategy mandate, run it through repeatable historical backtests / walk-forward
+checks, store the evidence, and optionally block assignment to live or paper
+traders unless the mandate is validated.
+
+**Why deferred**: The current repo has a lightweight `backtest` tool and shared
+condition evaluator, but not a mandate-level validation platform with datasets,
+approval records, replay reproducibility, or promotion rules. Adding that now
+would mix research governance into the trading execution refactor.
+
+**Current handling**: `strategy_mandates.validation_status` and
+`validation_notes` record the state explicitly. Researcher-created mandates
+should start as `draft` with `pending` or `deferred` validation. Trader runtime
+currently requires an assigned active mandate, but does not enforce historical
+backtest approval.
+
+**When to revisit**: before allowing resident traders to promote researcher
+ideas into unattended live trading, or when mandate assignment needs an
+auditable approval workflow.
 
 ### B3 — TradeReviewer counter
 **What**: `tradesSinceLastReview` — the counter that triggers automatic LLM

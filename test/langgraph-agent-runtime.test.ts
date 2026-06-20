@@ -3,6 +3,7 @@ import { hasToolCalls, type AgentAssistantMessage } from "../src/agent/provider-
 import { createAgentGraphRuntime, routeAfterModel } from "../src/agent/langgraph-runtime.js";
 import { registerTool, TOOL_HANDLERS } from "../src/tools/registry.js";
 import type { AgentToolDeps } from "../src/agent/tool-dispatch.js";
+import { config } from "../src/config.js";
 
 describe("provider-step helpers", () => {
   test("detects assistant messages with tool calls", () => {
@@ -43,6 +44,9 @@ describe("LangGraph agent routing", () => {
 
 describe("LangGraph agent runtime", () => {
   test("runs model, executes tool, then returns final text", async () => {
+    const oldApiBaseUrl = config.apiBaseUrl;
+    config.apiBaseUrl = "";
+
     if (!TOOL_HANDLERS.unit_echo) {
       registerTool(
         "unit_echo",
@@ -97,19 +101,23 @@ describe("LangGraph agent runtime", () => {
       getStrategyStore: () => null,
     } satisfies AgentToolDeps;
 
-    const result = await createAgentGraphRuntime().run({
-      provider: "openai",
-      client,
-      messages: [{ role: "user", content: "call the echo tool" }],
-      systemPrompt: "system",
-      sessionId: "s1",
-      callbacks: { onToolUse },
-      toolDeps: deps,
-    });
+    try {
+      const result = await createAgentGraphRuntime().run({
+        provider: "openai",
+        client,
+        messages: [{ role: "user", content: "call the echo tool" }],
+        systemPrompt: "system",
+        sessionId: "s1",
+        callbacks: { onToolUse },
+        toolDeps: deps,
+      });
 
-    expect(result.finalText).toBe("done");
-    expect(result.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
-    expect(onToolUse).toHaveBeenCalledWith("unit_echo");
-    expect(client.chat.completions.create).toHaveBeenCalledTimes(2);
+      expect(result.finalText).toBe("done");
+      expect(result.messages.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
+      expect(onToolUse).toHaveBeenCalledWith("unit_echo");
+      expect(client.chat.completions.create).toHaveBeenCalledTimes(2);
+    } finally {
+      config.apiBaseUrl = oldApiBaseUrl;
+    }
   });
 });

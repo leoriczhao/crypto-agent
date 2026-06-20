@@ -1,4 +1,8 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
+import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 vi.mock("../src/config.js", () => ({
   config: {
@@ -247,50 +251,92 @@ describe("tools (mocked exchange)", () => {
     }));
   });
 
-  test("open_position attributes orders to llm_trader jobs when session matches a trader job", async () => {
+  test("open_position attributes orders and trades to resident agent runs and mandates", async () => {
     await import("../src/tools/open-position.js");
     const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
-    const exchange = makeMockExchange({
-      fetchTicker: vi.fn().mockResolvedValue({ symbol: "ETH/USDT:USDT", last: 2500 }),
-    });
-    const broker = {
-      createOrder: vi.fn().mockResolvedValue({
-        id: "paper-llm-1",
+    const { Memory } = await import("../src/memory.js");
+    const dbPath = join(tmpdir(), `crypto-tools-resident-${randomUUID().slice(0, 8)}.db`);
+    const memory = new Memory(dbPath);
+    try {
+      const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+      const allocation = memory.ensureBotAllocation({
+        botId: identity.bot.id,
+        tradingAccountId: identity.tradingAccount.id,
+        asset: "USDT",
+        amount: 2000,
+      });
+      const mandate = memory.createStrategyMandate({
+        id: "trend_pullback_v1",
+        name: "Trend Pullback",
+        status: "active",
+        body: { style: "trend_pullback" },
+      });
+      const resident = memory.createResidentAgent({
+        id: "resident-trader-1",
+        type: "trader",
+        name: "BTC/ETH Paper Trader",
+        botId: identity.bot.id,
+        tradingAccountId: identity.tradingAccount.id,
+        capitalAllocationId: allocation.id,
+      });
+      memory.assignMandateToAgent({
+        agentId: resident.id,
+        mandateId: mandate.id,
+        universe: ["BTC/USDT:USDT", "ETH/USDT:USDT"],
+      });
+      const run = memory.createAgentRun({
+        id: "run-resident-1",
+        agentId: resident.id,
+        trigger: "manual",
+        mandateIds: [mandate.id],
+      });
+      const exchange = makeMockExchange({
+        fetchTicker: vi.fn().mockResolvedValue({ symbol: "ETH/USDT:USDT", last: 2500 }),
+      });
+      const broker = {
+        createOrder: vi.fn().mockResolvedValue({
+          id: "paper-resident-1",
+          symbol: "ETH/USDT:USDT",
+          status: "filled",
+          price: 2500,
+          amount: 0.04,
+        }),
+      };
+
+      await TOOL_HANDLERS.open_position({
+        exchange,
+        market_data: exchange,
+        broker,
+        config: { paperTrading: true, paperMaxLeverage: 5 },
+        memory,
+        sessionId: resident.sessionId,
         symbol: "ETH/USDT:USDT",
-        status: "filled",
-        price: 2500,
-        amount: 0.04,
-      }),
-    };
-    const memory = {
-      getLlmTraderJobBySessionId: vi.fn().mockReturnValue({
-        id: 7,
-        botId: "bot-llm",
-        tradingAccountId: "acct-llm",
-        sessionId: "llm-trader-1",
-      }),
-      logTrade: vi.fn(),
-    };
+        side: "long",
+        notional_usdt: 100,
+        leverage: 2,
+      });
 
-    await TOOL_HANDLERS.open_position({
-      exchange,
-      market_data: exchange,
-      broker,
-      config: { paperTrading: true, paperMaxLeverage: 5 },
-      memory,
-      sessionId: "llm-trader-1",
-      symbol: "ETH/USDT:USDT",
-      side: "short",
-      notional_usdt: 100,
-      leverage: 2,
-    });
-
-    expect(broker.createOrder).toHaveBeenCalledWith(expect.objectContaining({
-      actorType: "llm_trader",
-      actorId: "7",
-      botId: "bot-llm",
-      tradingAccountId: "acct-llm",
-    }));
+      expect(broker.createOrder).toHaveBeenCalledWith(expect.objectContaining({
+        actorType: "resident_agent",
+        actorId: resident.id,
+        botId: identity.bot.id,
+        tradingAccountId: identity.tradingAccount.id,
+        agentRunId: run.id,
+        mandateId: mandate.id,
+        capitalAllocationId: allocation.id,
+      }));
+      expect(memory.getRecentTrades(1)[0]).toMatchObject({
+        session_id: resident.sessionId,
+        agentRunId: run.id,
+        mandateId: mandate.id,
+        capitalAllocationId: allocation.id,
+        botId: identity.bot.id,
+        tradingAccountId: identity.tradingAccount.id,
+      });
+    } finally {
+      memory.close();
+      if (existsSync(dbPath)) try { unlinkSync(dbPath); } catch {}
+    }
   });
 
   test("open_position rejects leverage above paper max", async () => {

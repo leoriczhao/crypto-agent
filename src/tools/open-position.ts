@@ -53,6 +53,9 @@ registerTool(
               leverage,
               actorType: ctx.actorType,
               actorId: ctx.actorId,
+              agentRunId: ctx.agentRunId,
+              mandateId: ctx.mandateId,
+              capitalAllocationId: ctx.capitalAllocationId,
               botId: ctx.botId,
               tradingAccountId: ctx.tradingAccountId,
             });
@@ -85,6 +88,9 @@ registerTool(
         order_type,
         mode,
         reasoning: `[Contract] open ${side} ${notional_usdt} USDT @ ${leverage}x`,
+        agentRunId: ctx.agentRunId,
+        mandateId: ctx.mandateId,
+        capitalAllocationId: ctx.capitalAllocationId,
         botId: ctx.botId,
         tradingAccountId: ctx.tradingAccountId,
       });

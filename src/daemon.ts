@@ -17,6 +17,8 @@ import { buildWorldSnapshot } from "./world-snapshot.js";
 import { IpcServer } from "./ipc/server.js";
 import { acquireDaemonLock, releaseDaemonLock, DaemonAlreadyRunningError } from "./ipc/lockfile.js";
 import { socketPath } from "./ipc/paths.js";
+import { ResidentAgentRuntime } from "./agents/runtime.js";
+import { runDueResidentAgents } from "./agents/scheduler.js";
 
 /**
  * Headless crypto trading daemon. Runs all stateful components (agent,
@@ -30,6 +32,7 @@ class CryptoDaemon {
   private memory: Memory;
   private notifier: Notifier;
   private heartbeat: HeartbeatScheduler;
+  private residentRuntime: ResidentAgentRuntime;
   private userSessionId: string;
   private systemSessionId: string;
   private activeIdentity!: DefaultIdentity;
@@ -49,6 +52,7 @@ class CryptoDaemon {
     this.agent = new CryptoAgent();
     this.memory = new Memory(config.memoryDbPath);
     this.agent.memory = this.memory;
+    this.residentRuntime = new ResidentAgentRuntime({ memory: this.memory, agent: this.agent });
 
     // Restore user-driven soul / exchange choices before any fast-path setup
     this.restoreDaemonState();
@@ -779,27 +783,26 @@ class CryptoDaemon {
         signal.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
       });
       if (this.shuttingDown) break;
+      await runDueResidentAgents({
+        memory: this.memory,
+        runtime: this.residentRuntime,
+        log: (msg) => this.log(msg),
+      });
+
       const dueJobs = this.memory.getDueCronJobs();
       for (const job of dueJobs) {
         try {
-          const traderJob = this.memory.getLlmTraderJobByCronJobId(job.id);
-          if (traderJob && !traderJob.enabled) continue;
-          const runSessionId = traderJob?.sessionId ?? this.systemSessionId;
-          const runPrompt = traderJob?.prompt ?? `[CRON] Execute scheduled task: ${job.description}`;
-          if (traderJob && !this.agent.sessions.has(runSessionId)) {
-            const session = this.agent.sessions.create(`LLM trader #${traderJob.id}`, "system", runSessionId);
-            const messages = this.memory.loadRecentMessages(runSessionId, 20);
-            if (messages.length) session.messages = messages;
-          }
+          const interval = parseInt(job.cron_expr.replace("every_", "").replace("m", ""), 10);
+          const nextRun = new Date(Date.now() + interval * 60_000).toISOString();
+          this.memory.updateCronNextRun(job.id, nextRun);
+          const runSessionId = this.systemSessionId;
+          const runPrompt = `[CRON] Execute scheduled task: ${job.description}`;
           const response = await this.agent.chatInSession(
             runSessionId,
             runPrompt,
           );
-          this.memory.saveMessage(runSessionId, "user", traderJob ? `[LLM_TRADER_JOB] ${traderJob.prompt}` : `[CRON] ${job.description}`);
+          this.memory.saveMessage(runSessionId, "user", `[CRON] ${job.description}`);
           this.memory.saveMessage(runSessionId, "assistant", response);
-          const interval = parseInt(job.cron_expr.replace("every_", "").replace("m", ""), 10);
-          const nextRun = new Date(Date.now() + interval * 60_000).toISOString();
-          this.memory.updateCronNextRun(job.id, nextRun);
         } catch (e: any) {
           this.log(`[Cron error] ${e.message ?? e}`);
         }

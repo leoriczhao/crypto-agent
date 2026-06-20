@@ -76,6 +76,9 @@ registerTool(
               price: order_type === "limit" ? price ?? null : null,
               actorType: ctx.actorType,
               actorId: ctx.actorId,
+              agentRunId: ctx.agentRunId,
+              mandateId: ctx.mandateId,
+              capitalAllocationId: ctx.capitalAllocationId,
               botId: ctx.botId,
               tradingAccountId: ctx.tradingAccountId,
             })
@@ -102,6 +105,11 @@ registerTool(
             price: result.price ?? ticker.last,
             order_type,
             mode,
+            agentRunId: ctx.agentRunId,
+            mandateId: ctx.mandateId,
+            capitalAllocationId: ctx.capitalAllocationId,
+            botId: ctx.botId,
+            tradingAccountId: ctx.tradingAccountId,
           });
         }
 

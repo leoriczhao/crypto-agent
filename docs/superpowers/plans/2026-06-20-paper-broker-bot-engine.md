@@ -12,11 +12,11 @@
 
 - `src/market-data/types.ts` and `src/market-data/ccxt-provider.ts` define and implement public market data.
 - `src/broker/types.ts`, `src/broker/symbols.ts`, and `src/broker/paper-broker.ts` define and implement the paper broker.
-- `bot_allocations`, `paper_orders`, `paper_positions`, `paper_fills`, and `llm_trader_jobs` persist paper account state in SQLite.
+- `bot_allocations`, `paper_orders`, `paper_positions`, `paper_fills`, `strategy_mandates`, and `resident_agents` persist paper account and resident-agent state in SQLite.
 - `buy`, `sell`, `open_position`, `close_position`, `get_portfolio`, `assess_risk`, and world snapshots use broker context in paper mode.
 - `StrategyRuntime`, `RiskGate`, and `OrderExecutor` call `PaperBroker` directly in paper mode.
 - `MarketFeed` consumes `MarketDataProvider` directly.
-- Scheduled LLM trader jobs run in dedicated system sessions and are attributed as `llm_trader`.
+- Resident traders run in dedicated system sessions and are attributed as `resident_agent` with `agent_run_id`, `mandate_id`, and `capital_allocation_id`.
 - Paper daemon startup seeds the active bot allocation from `INITIAL_BALANCE_USDT` only when no allocation row exists.
 
 ## Removed

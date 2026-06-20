@@ -25,6 +25,10 @@ describe("non-compat architecture boundary", () => {
     expect(memory).not.toContain("strategy_rules");
     expect(memory).not.toContain("migrateLegacyRulesToStrategies");
     expect(memory).not.toContain("migrateAddIdentityColumns");
+    expect(memory).not.toContain("migrateAgentAttributionColumns");
+    expect(memory).not.toContain("ALTER TABLE");
+    expect(memory).not.toContain("llm_trader_jobs");
+    expect(memory).not.toContain("LlmTraderJob");
     expect(memory).not.toContain("backfillDefaultIdentity");
     expect(memory).not.toContain("legacy");
     expect(memory).not.toContain("backwards compat");

@@ -7,7 +7,6 @@ import { CcxtMarketDataProvider } from "./market-data/ccxt-provider.js";
 import { PaperBroker } from "./broker/paper-broker.js";
 import type { Broker } from "./broker/types.js";
 import type { MarketDataProvider } from "./market-data/types.js";
-import { TOOL_DEFINITIONS } from "./tools/registry.js";
 import { Soul } from "./soul.js";
 import { SkillLoader } from "./skill-loader.js";
 import { SessionManager } from "./session.js";
@@ -16,6 +15,7 @@ import { buildWorldSnapshot } from "./world-snapshot.js";
 import { type AgentToolDeps } from "./agent/tool-dispatch.js";
 import { createAgentGraphRuntime } from "./agent/langgraph-runtime.js";
 import type { AgentMessage } from "./agent/provider-step.js";
+import { injectEphemeralCurrentState } from "./agent/ephemeral-current-state.js";
 import type { DefaultIdentity, Memory } from "./memory.js";
 import type { StrategyManager } from "./strategy/manager.js";
 import "./tools/index.js";
@@ -164,24 +164,21 @@ export class CryptoAgent {
     };
   }
 
-  private async buildFullSystemPrompt(sessionId?: string): Promise<string> {
-    let prompt = this.systemPrompt;
-    if (config.worldSnapshotEnabled) {
-      try {
-        const snapshot = await buildWorldSnapshot({
-          paperTrading: config.paperTrading,
-          strategyStore: this.strategyStore,
-          memory: this.memory,
-          broker: this.broker,
-          exchange: config.paperTrading ? null : this.exchange,
-          sessionId,
-        });
-        prompt += `\n\n## Current State\n${snapshot}`;
-      } catch {
-        // Snapshot failure is non-fatal — LLM can still use tools to observe
-      }
+  private async buildCurrentStateSnapshot(sessionId?: string): Promise<string | null> {
+    if (!config.worldSnapshotEnabled) return null;
+    try {
+      return await buildWorldSnapshot({
+        paperTrading: config.paperTrading,
+        strategyStore: this.strategyStore,
+        memory: this.memory,
+        broker: this.broker,
+        exchange: config.paperTrading ? null : this.exchange,
+        sessionId,
+      });
+    } catch {
+      // Snapshot failure is non-fatal — LLM can still use tools to observe.
+      return null;
     }
-    return prompt;
   }
 
   async chatInSession(
@@ -200,18 +197,20 @@ export class CryptoAgent {
     throwIfCancelled(callbacks.signal);
     session.lastActiveAt = new Date();
 
-    const sysPrompt = await this.buildFullSystemPrompt(sessionId);
+    const sysPrompt = this.systemPrompt;
+    const snapshot = await this.buildCurrentStateSnapshot(sessionId);
+    const injected = injectEphemeralCurrentState(session.messages as AgentMessage[], snapshot);
     throwIfCancelled(callbacks.signal);
     const result = await this.langGraphRuntime.run({
       provider: this.provider,
       client: this.client,
-      messages: session.messages as AgentMessage[],
+      messages: injected.messages,
       systemPrompt: sysPrompt,
       sessionId,
       callbacks,
       toolDeps: this.createToolDeps(sessionId),
     });
-    session.messages = result.messages;
+    session.messages = injected.restore(result.messages);
     return result.finalText;
   }
 

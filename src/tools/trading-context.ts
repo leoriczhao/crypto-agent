@@ -3,19 +3,27 @@ import type { Memory } from "../memory.js";
 export interface ToolTradingContext {
   botId: string;
   tradingAccountId: string;
-  actorType: "session" | "llm_trader" | "system";
+  actorType: "session" | "resident_agent" | "system";
   actorId: string | null;
+  agentRunId: string | null;
+  mandateId: string | null;
+  capitalAllocationId: string | null;
 }
 
 export function resolveToolTradingContext(memory: Memory | null | undefined, sessionId?: string | null): ToolTradingContext {
   if (memory && sessionId) {
-    const traderJob = memory.getLlmTraderJobBySessionId?.(sessionId);
-    if (traderJob) {
+    const resident = memory.getResidentAgentBySessionId?.(sessionId);
+    if (resident) {
+      const run = memory.getActiveAgentRunBySessionId?.(sessionId);
+      const assignment = memory.listAgentMandateAssignments?.(resident.id, { activeOnly: true })?.[0];
       return {
-        botId: traderJob.botId,
-        tradingAccountId: traderJob.tradingAccountId,
-        actorType: "llm_trader",
-        actorId: String(traderJob.id),
+        botId: resident.botId,
+        tradingAccountId: resident.tradingAccountId,
+        actorType: "resident_agent",
+        actorId: resident.id,
+        agentRunId: run?.id ?? null,
+        mandateId: run?.mandateIds?.[0] ?? assignment?.mandateId ?? null,
+        capitalAllocationId: resident.capitalAllocationId ?? null,
       };
     }
   }
@@ -28,6 +36,9 @@ export function resolveToolTradingContext(memory: Memory | null | undefined, ses
         tradingAccountId: binding.tradingAccountId,
         actorType: "session",
         actorId: sessionId,
+        agentRunId: null,
+        mandateId: null,
+        capitalAllocationId: null,
       };
     }
   }
@@ -39,6 +50,9 @@ export function resolveToolTradingContext(memory: Memory | null | undefined, ses
       tradingAccountId: bot.tradingAccountId,
       actorType: sessionId ? "session" : "system",
       actorId: sessionId ?? null,
+      agentRunId: null,
+      mandateId: null,
+      capitalAllocationId: null,
     };
   }
 
@@ -47,6 +61,9 @@ export function resolveToolTradingContext(memory: Memory | null | undefined, ses
     tradingAccountId: "default-trading-paper",
     actorType: sessionId ? "session" : "system",
     actorId: sessionId ?? null,
+    agentRunId: null,
+    mandateId: null,
+    capitalAllocationId: null,
   };
 }
 
