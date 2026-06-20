@@ -378,7 +378,7 @@ describe("tools (mocked exchange)", () => {
         paperTrading: false,
         contractMaxLeverage: 5,
         contractMarginMode: "isolated",
-        contractPositionMode: "hedge",
+        contractPositionMode: "auto",
       },
       symbol: "BTC/USDT:USDT",
       side: "long",
@@ -396,6 +396,7 @@ describe("tools (mocked exchange)", () => {
       undefined,
       expect.objectContaining({
         marketType: "swap",
+        positionMode: "auto",
         positionSide: "long",
         marginMode: "isolated",
         leverage: 2,
@@ -433,7 +434,7 @@ describe("tools (mocked exchange)", () => {
       config: {
         paperTrading: false,
         contractMarginMode: "isolated",
-        contractPositionMode: "hedge",
+        contractPositionMode: "auto",
       },
       sessionId: "s1",
       symbol: "ETH/USDT:USDT",
@@ -451,6 +452,7 @@ describe("tools (mocked exchange)", () => {
       undefined,
       expect.objectContaining({
         marketType: "swap",
+        positionMode: "auto",
         positionSide: "short",
         marginMode: "isolated",
         reduceOnly: true,

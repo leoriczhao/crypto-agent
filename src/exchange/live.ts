@@ -1,9 +1,10 @@
 import ccxt, { type Exchange } from "ccxt";
-import type { BaseExchange, ExchangeOrderOptions } from "./base.js";
+import type { BaseExchange, ExchangeOrderOptions, ExchangePositionSide } from "./base.js";
 
 export class LiveExchange implements BaseExchange {
   private exchange: Exchange;
   readonly exchangeId: string;
+  private detectedPositionMode: "net" | "hedge" | null = null;
 
   constructor(exchangeId = "binance", apiKey = "", secret = "", password = "", httpsProxy = "") {
     this.exchangeId = exchangeId;
@@ -54,10 +55,11 @@ export class LiveExchange implements BaseExchange {
     options?: ExchangeOrderOptions,
   ) {
     const exchangeAmount = await this.toExchangeOrderAmount(symbol, amount, options);
-    if (options?.marketType === "swap" && options.leverage !== undefined) {
-      await this.setContractLeverage(symbol, options.leverage, {
-        marginMode: options.marginMode ?? "isolated",
-        positionSide: options.positionSide ?? "net",
+    const resolvedOptions = await this.resolveOrderOptions(options);
+    if (resolvedOptions?.marketType === "swap" && resolvedOptions.leverage !== undefined) {
+      await this.setContractLeverage(symbol, resolvedOptions.leverage, {
+        marginMode: resolvedOptions.marginMode ?? "isolated",
+        positionSide: resolvedOptions.positionSide ?? "net",
       });
     }
     const o = await this.exchange.createOrder(
@@ -66,7 +68,7 @@ export class LiveExchange implements BaseExchange {
       side,
       exchangeAmount,
       price ?? undefined,
-      this.createOrderParams(options),
+      this.createOrderParams(resolvedOptions),
     );
     return {
       id: o.id,
@@ -159,6 +161,30 @@ export class LiveExchange implements BaseExchange {
       params.reduceOnly = true;
     }
     return params;
+  }
+
+  private async resolveOrderOptions(options?: ExchangeOrderOptions): Promise<ExchangeOrderOptions | undefined> {
+    if (options?.marketType !== "swap" || options.positionMode !== "auto") return options;
+    const mode = await this.fetchContractPositionMode();
+    const desired = options.positionSide ?? "net";
+    const positionSide: ExchangePositionSide = mode === "hedge" && desired !== "net" ? desired : "net";
+    return { ...options, positionSide };
+  }
+
+  private async fetchContractPositionMode(): Promise<"net" | "hedge"> {
+    if (this.detectedPositionMode) return this.detectedPositionMode;
+    const fetchPositionMode = (this.exchange as any).fetchPositionMode;
+    if (typeof fetchPositionMode !== "function") {
+      this.detectedPositionMode = "net";
+      return this.detectedPositionMode;
+    }
+    try {
+      const mode = await fetchPositionMode.call(this.exchange);
+      this.detectedPositionMode = mode?.hedged ? "hedge" : "net";
+    } catch {
+      this.detectedPositionMode = "net";
+    }
+    return this.detectedPositionMode;
   }
 
   private async setContractLeverage(

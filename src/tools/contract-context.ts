@@ -1,4 +1,4 @@
-import type { ExchangeMarginMode, ExchangePositionSide } from "../exchange/base.js";
+import type { ExchangeMarginMode, ExchangePositionMode, ExchangePositionSide } from "../exchange/base.js";
 
 export type ContractSide = "long" | "short";
 
@@ -11,8 +11,15 @@ export function contractMarginMode(config: any): ExchangeMarginMode {
   return config?.contractMarginMode === "cross" ? "cross" : "isolated";
 }
 
+export function contractPositionMode(config: any): ExchangePositionMode {
+  if (config?.contractPositionMode === "net" || config?.contractPositionMode === "hedge") {
+    return config.contractPositionMode;
+  }
+  return "auto";
+}
+
 export function contractPositionSide(config: any, side: ContractSide): ExchangePositionSide {
-  return config?.contractPositionMode === "hedge" ? side : "net";
+  return contractPositionMode(config) === "net" ? "net" : side;
 }
 
 export function contractMaxLeverage(config: any): number {

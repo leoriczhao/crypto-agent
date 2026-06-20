@@ -1,9 +1,11 @@
 export type ExchangeMarketType = "spot" | "swap";
 export type ExchangePositionSide = "long" | "short" | "net";
 export type ExchangeMarginMode = "cross" | "isolated";
+export type ExchangePositionMode = "auto" | "net" | "hedge";
 
 export interface ExchangeOrderOptions {
   marketType?: ExchangeMarketType;
+  positionMode?: ExchangePositionMode;
   positionSide?: ExchangePositionSide;
   marginMode?: ExchangeMarginMode;
   leverage?: number;

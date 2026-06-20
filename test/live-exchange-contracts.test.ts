@@ -24,6 +24,8 @@ class MockOkx {
   readonly orders: RecordedOrder[] = [];
   readonly leverages: RecordedLeverage[] = [];
   positions: Array<Record<string, unknown>> = [];
+  positionMode = { hedged: true };
+  fetchPositionModeCalls = 0;
 
   constructor(opts: Record<string, unknown>) {
     this.opts = opts;
@@ -45,6 +47,11 @@ class MockOkx {
   async setLeverage(leverage: number, symbol: string, params: Record<string, unknown> = {}) {
     this.leverages.push({ leverage, symbol, params });
     return { leverage, symbol, params };
+  }
+
+  async fetchPositionMode() {
+    this.fetchPositionModeCalls++;
+    return this.positionMode;
   }
 
   async loadMarkets() {}
@@ -100,6 +107,7 @@ describe("LiveExchange contract orders", () => {
 
     const result = await exchange.createOrder("BTC/USDT:USDT", "buy", "market", 0.004, undefined, {
       marketType: "swap",
+      positionMode: "auto",
       marginMode: "isolated",
       positionSide: "long",
       leverage: 3,
@@ -141,12 +149,35 @@ describe("LiveExchange contract orders", () => {
     });
   });
 
+  test("auto position mode maps one-way OKX accounts to net posSide", async () => {
+    const { LiveExchange } = await import("../src/exchange/live.js");
+    const exchange = new LiveExchange("okx");
+    const instance = ccxtMock.instances.at(-1)!;
+    instance.positionMode = { hedged: false };
+
+    await exchange.createOrder("BTC/USDT:USDT", "buy", "market", 0.004, undefined, {
+      marketType: "swap",
+      positionMode: "auto",
+      marginMode: "isolated",
+      positionSide: "long",
+      leverage: 3,
+    });
+
+    expect(instance.fetchPositionModeCalls).toBe(1);
+    expect(instance.leverages[0].params).toEqual({ marginMode: "isolated", posSide: "net" });
+    expect(instance.orders[0].params).toEqual({
+      marginMode: "isolated",
+      positionSide: "net",
+    });
+  });
+
   test("passes reduceOnly without changing leverage for live contract closes", async () => {
     const { LiveExchange } = await import("../src/exchange/live.js");
     const exchange = new LiveExchange("okx");
 
     await exchange.createOrder("ETH/USDT:USDT", "buy", "limit", 0.2, 2400, {
       marketType: "swap",
+      positionMode: "auto",
       marginMode: "isolated",
       positionSide: "short",
       reduceOnly: true,

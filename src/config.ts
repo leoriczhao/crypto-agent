@@ -83,7 +83,7 @@ export const config = {
   paperMaxLeverage: parseFloat(process.env.PAPER_MAX_LEVERAGE ?? "5"),
   contractMaxLeverage: parseFloat(process.env.CONTRACT_MAX_LEVERAGE ?? "5"),
   contractMarginMode: envEnum("CONTRACT_MARGIN_MODE", ["cross", "isolated"] as const, "isolated"),
-  contractPositionMode: envEnum("CONTRACT_POSITION_MODE", ["net", "hedge"] as const, "net"),
+  contractPositionMode: envEnum("CONTRACT_POSITION_MODE", ["auto", "net", "hedge"] as const, "auto"),
   heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL ?? "60", 10),
   memoryDbPath: process.env.MEMORY_DB_PATH ?? "crypto_agent.db",
   notifyTelegramToken: process.env.TELEGRAM_BOT_TOKEN ?? "",

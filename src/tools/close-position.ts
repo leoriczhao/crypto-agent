@@ -1,6 +1,6 @@
 import { registerTool } from "./registry.js";
 import { resolveToolTradingContext } from "./trading-context.js";
-import { contractMarginMode, contractOrderSide, contractPositionSide } from "./contract-context.js";
+import { contractMarginMode, contractOrderSide, contractPositionMode, contractPositionSide } from "./contract-context.js";
 import { normalizeSymbol } from "../broker/symbols.js";
 
 registerTool(
@@ -70,6 +70,7 @@ registerTool(
               order_type === "limit" ? price : undefined,
               {
                 marketType: "swap",
+                positionMode: contractPositionMode(config),
                 positionSide: contractPositionSide(config, side),
                 marginMode: contractMarginMode(config),
                 reduceOnly: true,

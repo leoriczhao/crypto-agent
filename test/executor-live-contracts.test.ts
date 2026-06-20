@@ -63,6 +63,7 @@ describe("OrderExecutor live contracts", () => {
       undefined,
       expect.objectContaining({
         marketType: "swap",
+        positionMode: "hedge",
         positionSide: "short",
         marginMode: "isolated",
         leverage: 2,

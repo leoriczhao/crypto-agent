@@ -155,6 +155,10 @@ The first contract model is intentionally narrow: USDT linear contracts. Paper
 mode simulates margin, fills, and PnL locally in SQLite. Live mode does not
 simulate execution; it passes swap order intent to the exchange with
 `marginMode`, `positionSide`, optional leverage, and `reduceOnly` for closes.
+`CONTRACT_POSITION_MODE=auto` detects OKX one-way vs long/short mode before
+live swap orders and maps `positionSide` to `net` or `long`/`short`
+accordingly; it does not call `setPositionMode()` or mutate exchange account
+configuration.
 Funding fees and exchange liquidation simulation are not implemented in paper
 mode.
 

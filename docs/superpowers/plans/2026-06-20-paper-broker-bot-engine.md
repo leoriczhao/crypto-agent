@@ -32,7 +32,9 @@
 - Live spot execution remains on `LiveExchange`.
 - Live contract execution is implemented as a thin exchange adapter path:
   live orders are sent to the exchange with contract params instead of local
-  paper accounting.
+  paper accounting. `CONTRACT_POSITION_MODE=auto` detects OKX account mode and
+  maps order `positionSide` to `net` or `long`/`short`; it does not mutate the
+  exchange account mode.
 - Funding fees, automatic liquidation, and multi-daemon multi-bot scheduling are not implemented.
 - Existing local SQLite databases from older schemas should be discarded or recreated before redeploying this branch.
 
