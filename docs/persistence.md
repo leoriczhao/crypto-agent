@@ -151,9 +151,12 @@ Paper mode now separates public market data from execution/accounting:
 - `buy`, `sell`, `RiskGate`, `OrderExecutor`, and paper order reconciliation call
   `PaperBroker` directly; market observation uses `MarketDataProvider`.
 
-The first contract model is intentionally narrow: USDT linear isolated-margin
-paper contracts only. Funding fees, exchange liquidation, and live contract
-execution are not implemented here.
+The first contract model is intentionally narrow: USDT linear contracts. Paper
+mode simulates margin, fills, and PnL locally in SQLite. Live mode does not
+simulate execution; it passes swap order intent to the exchange with
+`marginMode`, `positionSide`, optional leverage, and `reduceOnly` for closes.
+Funding fees and exchange liquidation simulation are not implemented in paper
+mode.
 
 ### P1 — Bot allocation and paper audit
 `bot_allocations` is the paper bot wallet. On first paper daemon startup, the

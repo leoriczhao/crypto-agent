@@ -23,7 +23,7 @@ export function normalizeSwapSymbol(symbol: string): NormalizedSymbol {
   const [quote, settle, trailing] = quoteSettle.split(":");
   if (!quote || !settle || trailing) throw new Error(`Invalid swap symbol: ${symbol}`);
   if (quote !== "USDT" || settle !== "USDT") {
-    throw new Error(`Only USDT linear paper swaps are supported: ${symbol}`);
+    throw new Error(`Only USDT linear swaps are supported: ${symbol}`);
   }
   return { symbol: trimmed, base, quote, settle, marketType: "swap" };
 }

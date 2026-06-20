@@ -69,6 +69,8 @@ export interface Signal {
    * strategy-emitted exit signals. */
   stopLossPct?: number;
   takeProfitPct?: number;
+  /** Optional leverage for contract entries. Ignored for spot orders and exits. */
+  leverage?: number;
   /** How the executor should submit this order. Default "market" = fill at
    * current ticker. "limit" requires a limitPrice and rests on the book
    * until price touches (or until the strategy cancels). */

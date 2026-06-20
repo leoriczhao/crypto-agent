@@ -354,21 +354,108 @@ describe("tools (mocked exchange)", () => {
     }));
   });
 
-  test("open_position reports live contract mode as unsupported", async () => {
+  test("open_position opens a live contract through the exchange with contract params", async () => {
     await import("../src/tools/open-position.js");
     const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    const exchange = makeMockExchange({
+      createOrder: vi.fn().mockResolvedValue({
+        id: "live-contract-1",
+        symbol: "BTC/USDT:USDT",
+        status: "filled",
+        side: "buy",
+        amount: 0.004,
+        price: 50000,
+      }),
+    });
+
     const result = await TOOL_HANDLERS.open_position({
-      exchange: makeMockExchange(),
-      market_data: makeMockExchange(),
+      exchange,
+      market_data: makeMockExchange({
+        fetchTicker: vi.fn().mockResolvedValue({ symbol: "BTC/USDT:USDT", last: 50000 }),
+      }),
       broker: null,
-      config: { paperTrading: false, paperMaxLeverage: 5 },
+      config: {
+        paperTrading: false,
+        contractMaxLeverage: 5,
+        contractMarginMode: "isolated",
+        contractPositionMode: "hedge",
+      },
       symbol: "BTC/USDT:USDT",
       side: "long",
       notional_usdt: 200,
       leverage: 2,
     });
-    expect(result).toContain("unsupported");
-    expect(result).toContain("paper");
+
+    expect(result).toContain("LIVE");
+    expect(result).toContain("filled");
+    expect(exchange.createOrder).toHaveBeenCalledWith(
+      "BTC/USDT:USDT",
+      "buy",
+      "market",
+      0.004,
+      undefined,
+      expect.objectContaining({
+        marketType: "swap",
+        positionSide: "long",
+        marginMode: "isolated",
+        leverage: 2,
+        reduceOnly: false,
+      }),
+    );
+  });
+
+  test("close_position closes a live contract with reduce-only params", async () => {
+    await import("../src/tools/close-position.js");
+    const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    const exchange = makeMockExchange({
+      fetchPositions: vi.fn().mockResolvedValue({
+        "ETH/USDT:USDT:short": {
+          symbol: "ETH/USDT:USDT",
+          side: "short",
+          amount: 0.2,
+          avg_entry_price: 2500,
+          current_price: 2400,
+        },
+      }),
+      createOrder: vi.fn().mockResolvedValue({
+        id: "live-contract-close-1",
+        symbol: "ETH/USDT:USDT",
+        status: "filled",
+        side: "buy",
+        amount: 0.2,
+        price: 2400,
+      }),
+    });
+
+    const result = await TOOL_HANDLERS.close_position({
+      exchange,
+      broker: null,
+      config: {
+        paperTrading: false,
+        contractMarginMode: "isolated",
+        contractPositionMode: "hedge",
+      },
+      sessionId: "s1",
+      symbol: "ETH/USDT:USDT",
+      side: "short",
+      order_type: "market",
+    });
+
+    expect(result).toContain("LIVE");
+    expect(result).toContain("filled");
+    expect(exchange.createOrder).toHaveBeenCalledWith(
+      "ETH/USDT:USDT",
+      "buy",
+      "market",
+      0.2,
+      undefined,
+      expect.objectContaining({
+        marketType: "swap",
+        positionSide: "short",
+        marginMode: "isolated",
+        reduceOnly: true,
+      }),
+    );
   });
 
   test("plan_grid_strategy rejects allocation above active bot free USDT", async () => {

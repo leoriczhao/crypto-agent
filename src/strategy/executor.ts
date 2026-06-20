@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { BaseExchange } from "../exchange/base.js";
+import type { BaseExchange, ExchangeMarginMode, ExchangeOrderOptions, ExchangePositionSide } from "../exchange/base.js";
 import type { Broker, BrokerOrderResult } from "../broker/types.js";
 import type { MarketFeed, Tick } from "../market-feed.js";
 import type { MarketDataProvider } from "../market-data/types.js";
@@ -35,6 +35,8 @@ export class OrderExecutor extends EventEmitter {
   private paperMode: boolean;
   private botId: string | null;
   private tradingAccountId: string | null;
+  private contractMarginMode: ExchangeMarginMode;
+  private contractPositionMode: "net" | "hedge";
   /** In-memory cache of signals for outstanding limit orders, keyed by
    * exchange order id. On async fill we use this to carry context that
    * pending_orders doesn't persist (e.g. takeProfitPct / stopLossPct). */
@@ -51,6 +53,8 @@ export class OrderExecutor extends EventEmitter {
     broker?: Broker | null;
     botId?: string | null;
     tradingAccountId?: string | null;
+    contractMarginMode?: ExchangeMarginMode;
+    contractPositionMode?: "net" | "hedge";
   }) {
     super();
     this.exchange = opts.exchange ?? null;
@@ -63,6 +67,8 @@ export class OrderExecutor extends EventEmitter {
     this.paperMode = opts.paperMode ?? true;
     this.botId = opts.botId ?? null;
     this.tradingAccountId = opts.tradingAccountId ?? null;
+    this.contractMarginMode = opts.contractMarginMode ?? "isolated";
+    this.contractPositionMode = opts.contractPositionMode ?? "net";
   }
 
   start(symbols: string[]): void {
@@ -109,7 +115,19 @@ export class OrderExecutor extends EventEmitter {
       });
     }
     if (!this.exchange) return { error: "No live exchange configured" };
-    return this.exchange.createOrder(symbol, side, orderType, amount, price);
+    return this.exchange.createOrder(symbol, side, orderType, amount, price, this.liveOrderOptions(signal));
+  }
+
+  private liveOrderOptions(signal: Signal): ExchangeOrderOptions | undefined {
+    if (!signal.symbol.includes(":")) return undefined;
+    const positionSide: ExchangePositionSide = this.contractPositionMode === "hedge" ? signal.side : "net";
+    return {
+      marketType: "swap",
+      positionSide,
+      marginMode: this.contractMarginMode,
+      leverage: signal.action === "enter" ? signal.leverage : undefined,
+      reduceOnly: signal.action === "exit",
+    };
   }
 
   /**

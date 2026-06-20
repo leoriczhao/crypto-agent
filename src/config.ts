@@ -29,6 +29,11 @@ function envJsonObject(key: string, defaultVal: Record<string, any>): Record<str
   }
 }
 
+function envEnum<T extends string>(key: string, allowed: readonly T[], defaultVal: T): T {
+  const raw = process.env[key]?.trim().toLowerCase();
+  return allowed.includes(raw as T) ? raw as T : defaultVal;
+}
+
 function envStopSequences(): string[] | null {
   const raw = process.env["LLM_STOP"];
   if (!raw || !raw.trim()) return null;
@@ -76,6 +81,9 @@ export const config = {
   initialBalance: { USDT: parseFloat(process.env.INITIAL_BALANCE_USDT ?? "10000") } as Record<string, number>,
   maxOrderSizeUsdt: parseFloat(process.env.MAX_ORDER_SIZE_USDT ?? "1000"),
   paperMaxLeverage: parseFloat(process.env.PAPER_MAX_LEVERAGE ?? "5"),
+  contractMaxLeverage: parseFloat(process.env.CONTRACT_MAX_LEVERAGE ?? "5"),
+  contractMarginMode: envEnum("CONTRACT_MARGIN_MODE", ["cross", "isolated"] as const, "isolated"),
+  contractPositionMode: envEnum("CONTRACT_POSITION_MODE", ["net", "hedge"] as const, "net"),
   heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL ?? "60", 10),
   memoryDbPath: process.env.MEMORY_DB_PATH ?? "crypto_agent.db",
   notifyTelegramToken: process.env.TELEGRAM_BOT_TOKEN ?? "",
