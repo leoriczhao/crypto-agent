@@ -1,5 +1,6 @@
 import { registerTool } from "./registry.js";
 import { resolveToolTradingContext } from "./trading-context.js";
+import { collectDeploymentHealth, renderDeploymentHealthDetail } from "../strategy/deployment-health.js";
 import type { StrategyDeploymentMode } from "../memory.js";
 
 function modeValue(value: unknown): StrategyDeploymentMode {
@@ -53,6 +54,9 @@ registerTool(
                 `    ${instance.id} | ${instance.enabled ? "enabled" : "disabled"} | ${instance.kind} | ${instance.symbol} | allocated=${instance.allocatedUsdt} | bot=${instance.botId} | account=${instance.tradingAccountId}`,
               );
             }
+          }
+          if (dep.mode === "PAPER") {
+            lines.push(...renderDeploymentHealthDetail(collectDeploymentHealth(memory, dep, instances)));
           }
         }
         return lines.join("\n");

@@ -124,6 +124,137 @@ describe("strategy package tools", () => {
     expect(status).toContain("allocated=150");
   });
 
+  test("deployment status includes paper trading health for owned instances", async () => {
+    await import("../src/tools/index.js");
+    const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    memory.createSession("user-session", "user", "user", identity.bot.id);
+    memory.createStrategyPackage({
+      id: "btc_eth_signal",
+      version: 1,
+      familyId: "btc_eth_signal",
+      name: "BTC/ETH Signal",
+      status: "paper_ready",
+      source: "researcher",
+      mandate: { thesis: "Trade pullbacks." },
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT", "ETH/USDT:USDT"],
+        timeframe: "15m",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 35 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 1.5,
+        takeProfitPct: 3,
+      },
+      riskPolicy: { maxLeverage: 1, maxSingleNotionalUsdt: 50, maxTotalNotionalUsdt: 300 },
+      validationStatus: "waived",
+      validationSummary: "Paper smoke waiver.",
+    });
+
+    await TOOL_HANDLERS.deploy_strategy({
+      memory,
+      strategy_deployment_service: service,
+      sessionId: "user-session",
+      action: "activate",
+      deployment_id: "deploy-health",
+      package_id: "btc_eth_signal",
+      package_version: 1,
+      mode: "PAPER",
+      capital_usdt: 300,
+    });
+
+    const [btcInstance] = memory.listStrategyInstances("deploy-health");
+    expect(btcInstance).toBeTruthy();
+    memory.upsertPaperPosition({
+      id: `${identity.tradingAccount.id}:${identity.bot.id}:BTC/USDT:USDT:long`,
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      positionSide: "long",
+      amount: 0.01,
+      avgEntryPrice: 50000,
+      markPrice: 50500,
+      leverage: 2,
+      marginUsdt: 250,
+      unrealizedPnl: 5,
+      realizedPnl: 0,
+    });
+    memory.createPaperOrder({
+      id: "paper-open-1",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      actorType: "strategy",
+      actorId: btcInstance.id,
+      capitalAllocationId: `${identity.tradingAccount.id}:${identity.bot.id}:USDT`,
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      side: "buy",
+      positionSide: "long",
+      orderType: "limit",
+      amount: 0.01,
+      price: 49000,
+      leverage: 2,
+      status: "open",
+    });
+    memory.insertPaperFill({
+      orderId: "paper-fill-1",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      actorType: "strategy",
+      actorId: btcInstance.id,
+      capitalAllocationId: `${identity.tradingAccount.id}:${identity.bot.id}:USDT`,
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      side: "sell",
+      positionSide: "long",
+      amount: 0.01,
+      price: 50600,
+      realizedPnl: 6,
+    });
+    memory.createPendingOrder({
+      strategyId: btcInstance.id,
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      positionId: btcInstance.id,
+      action: "enter",
+      symbol: "BTC/USDT:USDT",
+      side: "buy",
+      orderType: "limit",
+      price: 49000,
+      amount: 0.01,
+      exchangeOrderId: "paper-open-1",
+    });
+    (memory as any).recordStrategySignal(btcInstance.id, {
+      ruleId: btcInstance.id,
+      symbol: "BTC/USDT:USDT",
+      side: "long",
+      action: "enter",
+      sizeUsdt: 50,
+      reason: "RSI pullback",
+      timestamp: 1700000000000,
+      orderType: "limit",
+      limitPrice: 49000,
+    });
+    (memory as any).recordStrategyError(btcInstance.id, "risk gate rejected oversize order");
+
+    const status = await TOOL_HANDLERS.deploy_strategy({
+      memory,
+      strategy_deployment_service: service,
+      action: "status",
+    });
+
+    expect(status).toContain("Paper: positions=1 open_orders=1 pending_orders=1 fills=1 margin=250 unrealized_pnl=5 realized_pnl=6");
+    expect(status).toContain("Position: BTC/USDT:USDT long amount=0.01 entry=50000 mark=50500 margin=250 uPnL=5");
+    expect(status).toContain(`OpenOrder: paper-open-1 buy limit BTC/USDT:USDT amount=0.01 price=49000 actor=${btcInstance.id}`);
+    expect(status).toContain("PendingOrder: paper-open-1 buy limit BTC/USDT:USDT amount=0.01 price=49000 strategy=");
+    expect(status).toContain("Fill: paper-fill-1 sell BTC/USDT:USDT amount=0.01 price=50600 realized_pnl=6");
+    expect(status).toContain("LastSignal: BTC/USDT:USDT enter long size=50 order=limit price=49000 reason=RSI pullback");
+    expect(status).toContain("LastError: risk gate rejected oversize order");
+  });
+
   test("stops a strategy deployment with correct status wording", async () => {
     await import("../src/tools/index.js");
     const { TOOL_HANDLERS } = await import("../src/tools/registry.js");

@@ -160,6 +160,33 @@ describe("ResidentAgentRuntime", () => {
       residentTraderId: resident.id,
       runtimePolicy: {},
     });
+    memory.createStrategyInstance({
+      id: "deploy-btc:btc-usdt-usdt",
+      deploymentId: "deploy-btc",
+      packageId: "btc_signal",
+      packageVersion: 1,
+      kind: "signal",
+      symbol: "BTC/USDT:USDT",
+      params: {},
+      allocatedUsdt: 300,
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+    });
+    memory.upsertPaperPosition({
+      id: `${identity.tradingAccount.id}:${identity.bot.id}:BTC/USDT:USDT:long`,
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      symbol: "BTC/USDT:USDT",
+      marketType: "swap",
+      positionSide: "long",
+      amount: 0.01,
+      avgEntryPrice: 50000,
+      markPrice: 50500,
+      leverage: 2,
+      marginUsdt: 250,
+      unrealizedPnl: 5,
+      realizedPnl: 0,
+    });
 
     const agent = {
       sessions: new SessionManager(),
@@ -174,5 +201,6 @@ describe("ResidentAgentRuntime", () => {
     expect(prompt).toContain("Active Deployments");
     expect(prompt).toContain("deploy-btc");
     expect(prompt).toContain("btc_signal@1");
+    expect(prompt).toContain("health: positions=1 open_orders=0 pending_orders=0 fills=0 margin=250 unrealized_pnl=5 realized_pnl=0");
   });
 });

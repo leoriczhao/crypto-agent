@@ -58,14 +58,17 @@ export class StrategyRuntime extends EventEmitter {
     if (this.started.has(strategy.id)) return;
     const ctx: StrategyContext = {
       feed: this.feed,
-      emitSignal: (signal: Signal) => this.emit("signal", signal),
+      emitSignal: (signal: Signal) => {
+        this.memory?.recordStrategySignal(signal.ruleId || strategy.id, signal);
+        this.emit("signal", signal);
+      },
       cancelOrder: async (exchangeOrderId, symbol) => {
         if (!this.exchange && !this.broker) return;
         try {
           if (this.broker) await this.broker.cancelOrder(exchangeOrderId, symbol);
           else await this.exchange!.cancelOrder(exchangeOrderId, symbol);
         } catch (e: any) {
-          this.emit("strategy_error", { strategyId: strategy.id, error: `cancelOrder: ${e.message ?? e}` });
+          this.emitStrategyError(strategy.id, `cancelOrder: ${e.message ?? e}`);
         }
       },
       getRiskParams: () => this.manager.riskParams,
@@ -93,7 +96,7 @@ export class StrategyRuntime extends EventEmitter {
           else await this.exchange!.cancelOrder(o.exchangeOrderId, o.symbol);
           this.memory.updatePendingOrder(o.id, { status: "cancelled" });
         } catch (e: any) {
-          this.emit("strategy_error", { strategyId: id, error: `cascade-cancel ${o.exchangeOrderId}: ${e.message ?? e}` });
+          this.emitStrategyError(id, `cascade-cancel ${o.exchangeOrderId}: ${e.message ?? e}`);
         }
       }
     }
@@ -109,6 +112,12 @@ export class StrategyRuntime extends EventEmitter {
    * future Grid) react to fills without poking the executor directly.
    */
   wireExecutor(executor: OrderExecutor): void {
+    executor.on("error", ({ signal, error }) => {
+      const strategyId = signal?.ruleId;
+      if (!strategyId) return;
+      this.emitStrategyError(strategyId, String(error));
+    });
+
     // Defer via setImmediate so strategy callbacks run AFTER the executor's
     // trade-lock critical section releases. Without this, a strategy that
     // emits a new signal from its onOrderFilled (grid placing a sell after a
@@ -129,7 +138,7 @@ export class StrategyRuntime extends EventEmitter {
             timestamp: position.enteredAt,
           });
         } catch (e: any) {
-          this.emit("strategy_error", { strategyId: strat.id, error: e?.message ?? String(e) });
+          this.emitStrategyError(strat.id, e?.message ?? String(e));
         }
       });
     });
@@ -149,10 +158,15 @@ export class StrategyRuntime extends EventEmitter {
             timestamp: Date.now(),
           });
         } catch (e: any) {
-          this.emit("strategy_error", { strategyId: strat.id, error: e?.message ?? String(e) });
+          this.emitStrategyError(strat.id, e?.message ?? String(e));
         }
       });
     });
+  }
+
+  private emitStrategyError(strategyId: string, error: string): void {
+    this.memory?.recordStrategyError(strategyId, error);
+    this.emit("strategy_error", { strategyId, error });
   }
 
   /** Symbols whose tickers at least one started strategy cares about. */

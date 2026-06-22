@@ -129,6 +129,45 @@ describe("StrategyDeploymentService", () => {
     expect(memory.getStrategyDeployment("dep-1")?.stoppedAt).not.toBeNull();
   });
 
+  test("starts active deployments after a runtime restart", async () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const allocation = memory.ensureBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      amount: 300,
+    });
+    createSignalPackage(memory);
+    const service = new StrategyDeploymentService({ memory, manager, runtime });
+    await service.activate({
+      id: "dep-1",
+      packageId: "btc_eth_signal",
+      packageVersion: 1,
+      mode: "PAPER",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      capitalAllocationId: allocation.id,
+      allocatedUsdt: 300,
+    });
+
+    const restartedManager = new StrategyManager(memory);
+    const restartedRuntime = {
+      startOne: vi.fn(),
+      stopOne: vi.fn().mockResolvedValue(undefined),
+    };
+    const restartedService = new StrategyDeploymentService({
+      memory,
+      manager: restartedManager,
+      runtime: restartedRuntime,
+    });
+
+    restartedService.startActiveDeployments();
+
+    expect(restartedRuntime.startOne).toHaveBeenCalledTimes(2);
+    expect(restartedManager.getStrategy("dep-1:btc-usdt-usdt")).toBeDefined();
+    expect(restartedManager.getStrategy("dep-1:eth-usdt-usdt")).toBeDefined();
+  });
+
   test("blocks activation when package is not deployable", async () => {
     const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
     const allocation = memory.ensureBotAllocation({

@@ -8,6 +8,7 @@ import type {
   StrategyMandateRow,
   StrategyPackageRow,
 } from "../memory.js";
+import { collectDeploymentHealth, renderDeploymentHealthCompact } from "../strategy/deployment-health.js";
 
 export interface ResidentAgentRuntimeOptions {
   memory: Memory;
@@ -88,16 +89,23 @@ function formatStrategyPackages(packages: StrategyPackageRow[]): string {
   ].join("\n")).join("\n");
 }
 
-function formatDeployments(deployments: StrategyDeploymentRow[]): string {
+function formatDeployments(memory: Memory, deployments: StrategyDeploymentRow[]): string {
   if (!deployments.length) return "No deployments currently associated with this resident trader or bot.";
-  return deployments.map((deployment) => [
-    `- ${deployment.id} (${deployment.status}, ${deployment.mode})`,
-    `  package: ${deployment.packageId}@${deployment.packageVersion}`,
-    `  bot: ${deployment.botId}`,
-    `  trading_account: ${deployment.tradingAccountId}`,
-    `  allocation: ${deployment.capitalAllocationId}`,
-    `  resident_trader: ${deployment.residentTraderId ?? "n/a"}`,
-  ].join("\n")).join("\n");
+  return deployments.map((deployment) => {
+    const instances = memory.listStrategyInstances(deployment.id);
+    const lines = [
+      `- ${deployment.id} (${deployment.status}, ${deployment.mode})`,
+      `  package: ${deployment.packageId}@${deployment.packageVersion}`,
+      `  bot: ${deployment.botId}`,
+      `  trading_account: ${deployment.tradingAccountId}`,
+      `  allocation: ${deployment.capitalAllocationId}`,
+      `  resident_trader: ${deployment.residentTraderId ?? "n/a"}`,
+    ];
+    if (deployment.mode === "PAPER") {
+      lines.push(...renderDeploymentHealthCompact(collectDeploymentHealth(memory, deployment, instances)));
+    }
+    return lines.join("\n");
+  }).join("\n");
 }
 
 function runInstructions(agent: ResidentAgentRow): string[] {
@@ -128,6 +136,7 @@ function buildRunPrompt(opts: {
   mandates: Array<{ mandate: StrategyMandateRow; assignment: AgentMandateAssignmentRow }>;
   packages: StrategyPackageRow[];
   deployments: StrategyDeploymentRow[];
+  memory: Memory;
 }): string {
   return [
     `[RESIDENT_AGENT_RUN trigger=${opts.trigger}]`,
@@ -152,7 +161,7 @@ function buildRunPrompt(opts: {
     formatStrategyPackages(opts.packages),
     "",
     "## Active Deployments",
-    formatDeployments(opts.deployments),
+    formatDeployments(opts.memory, opts.deployments),
     "",
     "## Legacy Strategy Mandates",
     formatMandates(opts.mandates),
@@ -183,7 +192,7 @@ export class ResidentAgentRuntime {
     const deployments = this.loadRelevantDeployments(resident);
 
     this.ensureSessionLoaded(resident);
-    const prompt = buildRunPrompt({ agent: resident, trigger, mandates, packages, deployments });
+    const prompt = buildRunPrompt({ agent: resident, trigger, mandates, packages, deployments, memory: this.memory });
     const run = this.memory.createAgentRun({
       agentId,
       trigger,

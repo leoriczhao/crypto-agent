@@ -308,6 +308,15 @@ export interface StrategyInstanceRow {
   updatedAt: string;
 }
 
+export interface StrategyRuntimeStateRow {
+  strategyId: string;
+  lastSignal: Record<string, any> | null;
+  lastSignalAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  updatedAt: string;
+}
+
 export interface DefaultIdentity {
   fundingAccount: FundingAccountRow;
   tradingAccount: TradingAccountRow;
@@ -734,6 +743,15 @@ export class Memory {
         FOREIGN KEY (package_id, package_version) REFERENCES strategy_packages(id, version),
         FOREIGN KEY (bot_id) REFERENCES trading_bots(id),
         FOREIGN KEY (trading_account_id) REFERENCES trading_accounts(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_runtime_state (
+        strategy_id TEXT PRIMARY KEY,
+        last_signal TEXT,
+        last_signal_at TIMESTAMP,
+        last_error TEXT,
+        last_error_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS resident_agents (
@@ -2228,6 +2246,50 @@ export class Memory {
       botId: r.bot_id,
       tradingAccountId: r.trading_account_id,
       createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  recordStrategySignal(strategyId: string, signal: Record<string, any>, at = new Date().toISOString()): void {
+    this.db
+      .prepare(
+        `INSERT INTO strategy_runtime_state (strategy_id, last_signal, last_signal_at, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(strategy_id) DO UPDATE SET
+           last_signal = excluded.last_signal,
+           last_signal_at = excluded.last_signal_at,
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(strategyId, JSON.stringify(signal ?? {}), at);
+  }
+
+  recordStrategyError(strategyId: string, error: string, at = new Date().toISOString()): void {
+    this.db
+      .prepare(
+        `INSERT INTO strategy_runtime_state (strategy_id, last_error, last_error_at, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(strategy_id) DO UPDATE SET
+           last_error = excluded.last_error,
+           last_error_at = excluded.last_error_at,
+           updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(strategyId, error, at);
+  }
+
+  getStrategyRuntimeState(strategyId: string): StrategyRuntimeStateRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM strategy_runtime_state WHERE strategy_id = ?")
+      .get(strategyId) as any | undefined;
+    return row ? this.rowToStrategyRuntimeState(row) : null;
+  }
+
+  private rowToStrategyRuntimeState(r: any): StrategyRuntimeStateRow {
+    return {
+      strategyId: r.strategy_id,
+      lastSignal: r.last_signal ? this.parseJson<Record<string, any>>(r.last_signal, {}) : null,
+      lastSignalAt: r.last_signal_at ?? null,
+      lastError: r.last_error ?? null,
+      lastErrorAt: r.last_error_at ?? null,
       updatedAt: r.updated_at,
     };
   }
