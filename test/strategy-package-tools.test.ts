@@ -382,6 +382,105 @@ describe("strategy package tools", () => {
     });
   });
 
+  test("checks live strategy deployment without activating it", async () => {
+    await import("../src/tools/index.js");
+    const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    memory.createStrategyPackage({
+      id: "btc_live_signal",
+      version: 1,
+      familyId: "btc_live_signal",
+      name: "BTC Live Signal",
+      status: "live_ready",
+      source: "researcher",
+      mandate: { thesis: "Trade only after passed validation." },
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "1h",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 30 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 40,
+        stopLossPct: 2,
+        takeProfitPct: 4,
+      },
+      riskPolicy: { maxLeverage: 2, maxSingleNotionalUsdt: 40, maxTotalNotionalUsdt: 120 },
+      validationStatus: "passed",
+      validationSummary: "Backtest passed.",
+    });
+
+    const result = await TOOL_HANDLERS.deploy_strategy({
+      memory,
+      strategy_deployment_service: service,
+      action: "check",
+      package_id: "btc_live_signal",
+      package_version: 1,
+      mode: "LIVE",
+      capital_usdt: 300,
+      runtime_policy: { live_approved: true },
+      config: {
+        contractMarginMode: "isolated",
+        contractPositionMode: "hedge",
+        contractMaxLeverage: 5,
+      },
+    });
+
+    expect(result).toContain("Strategy deployment check: ok");
+    expect(result).toContain("mode=LIVE");
+    expect(result).toContain("package=btc_live_signal@1");
+    expect(result).toContain("instances=btc_live_signal:btc-usdt-usdt[signal:BTC/USDT:USDT]");
+    expect(result).toContain("margin_mode=isolated");
+    expect(result).toContain("position_mode=hedge");
+    expect(result).toContain("live_approved=true");
+    expect(memory.listStrategyDeployments()).toHaveLength(0);
+    expect(memory.listStrategyInstances()).toHaveLength(0);
+  });
+
+  test("blocks live activation without explicit approval", async () => {
+    await import("../src/tools/index.js");
+    const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "LIVE", name: "default" });
+    memory.createSession("user-session", "user", "user", identity.bot.id);
+    memory.createStrategyPackage({
+      id: "btc_live_signal",
+      version: 1,
+      familyId: "btc_live_signal",
+      name: "BTC Live Signal",
+      status: "live_ready",
+      source: "researcher",
+      mandate: { thesis: "Trade only after passed validation." },
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "1h",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 30 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 40,
+        stopLossPct: 2,
+        takeProfitPct: 4,
+      },
+      riskPolicy: { maxLeverage: 2, maxSingleNotionalUsdt: 40, maxTotalNotionalUsdt: 120 },
+      validationStatus: "passed",
+      validationSummary: "Backtest passed.",
+    });
+
+    const result = await TOOL_HANDLERS.deploy_strategy({
+      memory,
+      strategy_deployment_service: service,
+      sessionId: "user-session",
+      action: "activate",
+      package_id: "btc_live_signal",
+      package_version: 1,
+      mode: "LIVE",
+      capital_usdt: 300,
+    });
+
+    expect(result).toContain("live_approved");
+    expect(memory.listStrategyDeployments()).toHaveLength(0);
+    expect(memory.listStrategyInstances()).toHaveLength(0);
+  });
+
   test("runs signal validation backtest and marks package paper ready", async () => {
     await import("../src/tools/index.js");
     const { TOOL_HANDLERS } = await import("../src/tools/registry.js");

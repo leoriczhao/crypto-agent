@@ -1,10 +1,15 @@
 import { registerTool } from "./registry.js";
 import { resolveToolTradingContext } from "./trading-context.js";
 import { collectDeploymentHealth, renderDeploymentHealthDetail } from "../strategy/deployment-health.js";
+import { assertPackageDeployable, compileStrategyPackage } from "../strategy/package-compiler.js";
 import type { StrategyDeploymentMode } from "../memory.js";
 
 function modeValue(value: unknown): StrategyDeploymentMode {
   return String(value || "PAPER").toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+}
+
+function objectValue(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
 registerTool(
@@ -13,7 +18,7 @@ registerTool(
   {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["activate", "pause", "resume", "stop", "status"], default: "status" },
+      action: { type: "string", enum: ["activate", "check", "pause", "resume", "stop", "status"], default: "status" },
       deployment_id: { type: "string" },
       package_id: { type: "string" },
       package_version: { type: "integer", default: 1 },
@@ -23,7 +28,7 @@ registerTool(
       resident_trader_id: { type: "string" },
     },
   },
-  ["memory", "sessionId", "strategy_deployment_service"],
+  ["memory", "sessionId", "strategy_deployment_service", "config"],
   async ({
     memory,
     sessionId,
@@ -36,6 +41,7 @@ registerTool(
     capital_usdt,
     runtime_policy,
     resident_trader_id = "",
+    config,
   }) => {
     try {
       if (!memory) return "Error: memory is not initialized";
@@ -76,6 +82,64 @@ registerTool(
 
       const packageId = String(package_id || "").trim();
       if (!packageId) return "Error: package_id is required";
+      const targetMode = modeValue(mode);
+      const packageVersion = Number(package_version) || 1;
+      const runtimePolicy = objectValue(runtime_policy);
+
+      if (action === "check") {
+        const pkg = memory.getStrategyPackage(packageId, packageVersion);
+        if (!pkg) return `Error: strategy package not found: ${packageId}@${packageVersion}`;
+        const issues: string[] = [];
+        try {
+          assertPackageDeployable(pkg, targetMode);
+        } catch (e: any) {
+          issues.push(e.message ?? String(e));
+        }
+        const allocatedUsdt = Number(capital_usdt) > 0
+          ? Number(capital_usdt)
+          : Number(pkg.riskPolicy.maxTotalNotionalUsdt ?? 0) || undefined;
+        let instances: ReturnType<typeof compileStrategyPackage> = [];
+        try {
+          instances = compileStrategyPackage({
+            package: pkg,
+            deploymentId: packageId,
+            botId: "preflight-bot",
+            tradingAccountId: "preflight-account",
+            allocatedUsdt,
+          });
+        } catch (e: any) {
+          issues.push(e.message ?? String(e));
+        }
+        if (targetMode === "LIVE") {
+          if (runtimePolicy.live_approved !== true) issues.push("runtime_policy.live_approved=true is required for LIVE activation");
+          const maxLeverage = Number(pkg.riskPolicy.maxLeverage ?? 0);
+          const configuredMax = Number(config?.contractMaxLeverage ?? 0);
+          if (maxLeverage > 0 && configuredMax > 0 && maxLeverage > configuredMax) {
+            issues.push(`risk_policy.maxLeverage ${maxLeverage} exceeds configured contract max ${configuredMax}`);
+          }
+          for (const instance of instances) {
+            if (!instance.symbol.includes(":")) {
+              issues.push(`LIVE deployment requires swap contract symbol with settlement suffix: ${instance.symbol}`);
+            }
+          }
+        }
+        return [
+          `Strategy deployment check: ${issues.length ? "blocked" : "ok"}`,
+          `mode=${targetMode}`,
+          `package=${packageId}@${packageVersion}`,
+          `instances=${instances.map((i: any) => `${i.id}[${i.kind}:${i.symbol}]`).join(", ") || "none"}`,
+          `margin_mode=${config?.contractMarginMode ?? "isolated"}`,
+          `position_mode=${config?.contractPositionMode ?? "auto"}`,
+          `max_leverage=${pkg.riskPolicy.maxLeverage ?? "n/a"}`,
+          `live_approved=${runtimePolicy.live_approved === true}`,
+          issues.length ? `issues=${issues.join("; ")}` : "issues=none",
+        ].join("\n");
+      }
+
+      if (targetMode === "LIVE" && runtimePolicy.live_approved !== true) {
+        return "Error: runtime_policy.live_approved=true is required before LIVE strategy activation.";
+      }
+
       const ctx = resolveToolTradingContext(memory, sessionId);
       const capital = Number(capital_usdt);
       const existing = memory.getBotAllocation(ctx.botId, ctx.tradingAccountId, "USDT");
@@ -92,15 +156,13 @@ registerTool(
       const result = await strategy_deployment_service.activate({
         id: String(deployment_id || "").trim() || undefined,
         packageId,
-        packageVersion: Number(package_version) || 1,
-        mode: modeValue(mode),
+        packageVersion,
+        mode: targetMode,
         tradingAccountId: ctx.tradingAccountId,
         botId: ctx.botId,
         capitalAllocationId: allocation.id,
         residentTraderId: String(resident_trader_id || "") || ctx.actorId,
-        runtimePolicy: runtime_policy && typeof runtime_policy === "object" && !Array.isArray(runtime_policy)
-          ? runtime_policy as Record<string, any>
-          : {},
+        runtimePolicy,
         allocatedUsdt: allocation.allocated,
       });
 
