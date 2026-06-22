@@ -86,7 +86,7 @@ describe("research package to paper trade closed loop", () => {
     vi.resetModules();
     dbPath = join(tmpdir(), `crypto-research-paper-loop-${randomUUID().slice(0, 8)}.db`);
     memory = new Memory(dbPath);
-    memory.createSession("system", "system", "system");
+    memory.createSession("audit-system", "system", "system");
   });
 
   afterEach(() => {
@@ -136,7 +136,7 @@ describe("research package to paper trade closed loop", () => {
     const riskGate = new RiskGate({
       store: manager,
       broker,
-      botId: trader.botId,
+      botId: identity.bot.id,
       initialPortfolioValue: 2000,
       memory,
     });
@@ -148,8 +148,9 @@ describe("research package to paper trade closed loop", () => {
       store: manager,
       memory,
       paperMode: true,
-      botId: trader.botId,
-      tradingAccountId: trader.tradingAccountId,
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      auditSessionId: "audit-system",
     });
     const runtime = new StrategyRuntime({ feed, manager, memory, broker });
     const signalWork: Promise<any>[] = [];
@@ -206,12 +207,13 @@ describe("research package to paper trade closed loop", () => {
     const deployed = await TOOL_HANDLERS.deploy_strategy({
       memory,
       strategy_deployment_service: service,
-      sessionId: trader.sessionId,
+      sessionId: "main-session",
       action: "activate",
       deployment_id: "paper-closed-loop",
       package_id: "btc_eth_breakout_paper",
       package_version: 1,
       mode: "PAPER",
+      resident_trader_id: trader.id,
     });
     expect(deployed).toContain("Strategy deployment active");
 

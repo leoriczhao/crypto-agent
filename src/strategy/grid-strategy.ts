@@ -50,6 +50,8 @@ export class GridStrategy extends Strategy {
     params: GridStrategyParams;
     enabled?: boolean;
     allocatedUsdt?: number;
+    botId?: string | null;
+    tradingAccountId?: string | null;
     createdAt?: string;
     updatedAt?: string;
   }) {

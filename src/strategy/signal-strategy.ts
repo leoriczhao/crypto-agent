@@ -41,6 +41,8 @@ export class SignalStrategy extends Strategy {
     params: SignalStrategyParams;
     enabled?: boolean;
     allocatedUsdt?: number;
+    botId?: string | null;
+    tradingAccountId?: string | null;
     createdAt?: string;
     updatedAt?: string;
   }) {

@@ -45,6 +45,8 @@ export abstract class Strategy extends EventEmitter {
   readonly params: Record<string, any>;
   /** USDT budget this strategy is allowed to consume. 0 = no cap (B2 enforces). */
   allocatedUsdt: number;
+  readonly botId: string | null;
+  readonly tradingAccountId: string | null;
 
   readonly createdAt: string;
   updatedAt: string;
@@ -57,6 +59,8 @@ export abstract class Strategy extends EventEmitter {
     params: Record<string, any>;
     enabled?: boolean;
     allocatedUsdt?: number;
+    botId?: string | null;
+    tradingAccountId?: string | null;
     createdAt?: string;
     updatedAt?: string;
   }) {
@@ -66,6 +70,8 @@ export abstract class Strategy extends EventEmitter {
     this.params = opts.params;
     this.enabled = opts.enabled ?? true;
     this.allocatedUsdt = opts.allocatedUsdt ?? 0;
+    this.botId = opts.botId ?? null;
+    this.tradingAccountId = opts.tradingAccountId ?? null;
     this.createdAt = opts.createdAt ?? new Date().toISOString();
     this.updatedAt = opts.updatedAt ?? this.createdAt;
   }

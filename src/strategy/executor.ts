@@ -24,6 +24,12 @@ interface ActivePosition {
   enteredAt: number;
 }
 
+interface ExecutionOwner {
+  botId: string | null;
+  tradingAccountId: string | null;
+  capitalAllocationId: string | null;
+}
+
 export class OrderExecutor extends EventEmitter {
   private exchange: BaseExchange | null;
   private broker: Broker | null;
@@ -36,6 +42,7 @@ export class OrderExecutor extends EventEmitter {
   private paperMode: boolean;
   private botId: string | null;
   private tradingAccountId: string | null;
+  private auditSessionId: string;
   private contractMarginMode: ExchangeMarginMode;
   private contractPositionMode: ExchangePositionMode;
   /** In-memory cache of signals for outstanding limit orders, keyed by
@@ -54,6 +61,7 @@ export class OrderExecutor extends EventEmitter {
     broker?: Broker | null;
     botId?: string | null;
     tradingAccountId?: string | null;
+    auditSessionId?: string;
     contractMarginMode?: ExchangeMarginMode;
     contractPositionMode?: ExchangePositionMode;
   }) {
@@ -68,6 +76,7 @@ export class OrderExecutor extends EventEmitter {
     this.paperMode = opts.paperMode ?? true;
     this.botId = opts.botId ?? null;
     this.tradingAccountId = opts.tradingAccountId ?? null;
+    this.auditSessionId = opts.auditSessionId ?? "system";
     this.contractMarginMode = opts.contractMarginMode ?? "isolated";
     this.contractPositionMode = opts.contractPositionMode ?? "auto";
   }
@@ -99,11 +108,11 @@ export class OrderExecutor extends EventEmitter {
     price?: number | null,
   ): Promise<Record<string, any> | BrokerOrderResult> {
     if (this.broker) {
-      if (!this.botId || !this.tradingAccountId) {
+      const owner = this.executionOwner(signal);
+      if (!owner.botId || !owner.tradingAccountId) {
         return { error: "Broker execution requires botId and tradingAccountId" };
       }
       const marketType: MarketType = symbol.includes(":") ? "swap" : "spot";
-      const capitalAllocationId = this.capitalAllocationId();
       return this.broker.createOrder({
         symbol,
         marketType,
@@ -116,9 +125,9 @@ export class OrderExecutor extends EventEmitter {
         reduceOnly: marketType === "swap" && signal.action === "exit",
         actorType: "strategy",
         actorId: signal.ruleId,
-        capitalAllocationId,
-        botId: this.botId,
-        tradingAccountId: this.tradingAccountId,
+        capitalAllocationId: owner.capitalAllocationId,
+        botId: owner.botId,
+        tradingAccountId: owner.tradingAccountId,
       });
     }
     if (!this.exchange) return { error: "No live exchange configured" };
@@ -246,6 +255,11 @@ export class OrderExecutor extends EventEmitter {
   // ── Market path: immediate fill ───────────────────────────────────────────
 
   private async enterMarket(signal: Signal): Promise<void> {
+    const positionId = signal.positionId ?? signal.ruleId;
+    if (this.positions.has(positionId)) {
+      this.logEvent("signal_ignored", `${signal.symbol} enter ignored — position already open for ${positionId}`);
+      return;
+    }
     try {
       const ticker = await this.marketData.fetchTicker(signal.symbol);
       const price = ticker.last ?? 0;
@@ -289,6 +303,11 @@ export class OrderExecutor extends EventEmitter {
   // ── Limit path: place order, wait for async fill ─────────────────────────
 
   private async enterLimit(signal: Signal): Promise<void> {
+    const positionId = signal.positionId ?? signal.ruleId;
+    if (this.positions.has(positionId)) {
+      this.logEvent("signal_ignored", `${signal.symbol} enter ignored — position already open for ${positionId}`);
+      return;
+    }
     if (signal.limitPrice == null || signal.limitPrice <= 0) {
       this.emit("error", { signal, error: "limit order requires a positive limitPrice" });
       return;
@@ -309,11 +328,11 @@ export class OrderExecutor extends EventEmitter {
         return;
       }
 
-      const positionId = signal.positionId ?? signal.ruleId;
+      const owner = this.executionOwner(signal);
       this.memory?.createPendingOrder({
         strategyId: signal.ruleId,
-        botId: this.botId,
-        tradingAccountId: this.tradingAccountId,
+        botId: owner.botId,
+        tradingAccountId: owner.tradingAccountId,
         positionId,
         action: "enter",
         symbol: signal.symbol,
@@ -352,10 +371,11 @@ export class OrderExecutor extends EventEmitter {
         this.emit("error", { signal, error: result.error });
         return;
       }
+      const owner = this.executionOwner(signal);
       this.memory?.createPendingOrder({
         strategyId: signal.ruleId,
-        botId: this.botId,
-        tradingAccountId: this.tradingAccountId,
+        botId: owner.botId,
+        tradingAccountId: owner.tradingAccountId,
         positionId,
         action: "exit",
         symbol: pos.symbol,
@@ -447,11 +467,12 @@ export class OrderExecutor extends EventEmitter {
     };
     this.positions.set(positionId, pos);
 
+    const owner = this.executionOwner(signal);
     this.memory?.saveActivePosition({
       ruleId: positionId,
       strategyId: signal.ruleId,
-      botId: this.botId,
-      tradingAccountId: this.tradingAccountId,
+      botId: owner.botId,
+      tradingAccountId: owner.tradingAccountId,
       symbol: pos.symbol,
       side: pos.side,
       entryPrice: pos.entryPrice,
@@ -522,7 +543,8 @@ export class OrderExecutor extends EventEmitter {
     const orderSide = signal.action === "enter"
       ? signal.side === "long" ? "buy" : "sell"
       : signal.side === "long" ? "sell" : "buy";
-    this.memory?.logTrade("system", {
+    const owner = this.executionOwner(signal);
+    this.memory?.logTrade(this.auditSessionId, {
       symbol: signal.symbol,
       side: orderSide,
       amount,
@@ -531,15 +553,26 @@ export class OrderExecutor extends EventEmitter {
       mode: this.paperMode ? "PAPER" : "LIVE",
       reasoning: `[Auto] ${action}: ${signal.reason}`,
       strategyId: signal.ruleId,
-      botId: this.botId,
-      tradingAccountId: this.tradingAccountId,
-      capitalAllocationId: this.capitalAllocationId(),
+      botId: owner.botId,
+      tradingAccountId: owner.tradingAccountId,
+      capitalAllocationId: owner.capitalAllocationId,
     });
   }
 
-  private capitalAllocationId(): string | null {
-    if (!this.memory || !this.botId || !this.tradingAccountId) return null;
-    return this.memory.getBotAllocation(this.botId, this.tradingAccountId, "USDT")?.id ?? null;
+  private executionOwner(signal: Signal): ExecutionOwner {
+    const strategy = (this.store as any).getStrategy?.(signal.ruleId);
+    const botId = strategy?.botId ?? this.botId;
+    const tradingAccountId = strategy?.tradingAccountId ?? this.tradingAccountId;
+    return {
+      botId,
+      tradingAccountId,
+      capitalAllocationId: this.capitalAllocationId(botId, tradingAccountId),
+    };
+  }
+
+  private capitalAllocationId(botId: string | null, tradingAccountId: string | null): string | null {
+    if (!this.memory || !botId || !tradingAccountId) return null;
+    return this.memory.getBotAllocation(botId, tradingAccountId, "USDT")?.id ?? null;
   }
 
   private logEvent(type: string, data: string): void {

@@ -189,6 +189,7 @@ class CryptoDaemon {
         paperMode: config.paperTrading,
         botId: this.activeIdentity.bot.id,
         tradingAccountId: this.activeIdentity.tradingAccount.id,
+        auditSessionId: this.systemSessionId,
         contractMarginMode: config.contractMarginMode,
         contractPositionMode: config.contractPositionMode,
       });

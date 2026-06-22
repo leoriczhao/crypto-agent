@@ -141,12 +141,19 @@ registerTool(
       }
 
       const ctx = resolveToolTradingContext(memory, sessionId);
+      const residentTraderId = String(resident_trader_id || "").trim();
+      const residentTrader = residentTraderId ? memory.getResidentAgent(residentTraderId) : null;
+      if (residentTraderId && !residentTrader) return `Error: resident trader not found: ${residentTraderId}`;
+      if (residentTrader && residentTrader.type !== "trader") return `Error: resident agent is not a trader: ${residentTraderId}`;
+      if (residentTrader && residentTrader.status !== "active") return `Error: resident trader is not active: ${residentTraderId}`;
+      const activationBotId = residentTrader?.botId ?? ctx.botId;
+      const activationTradingAccountId = residentTrader?.tradingAccountId ?? ctx.tradingAccountId;
       const capital = Number(capital_usdt);
-      const existing = memory.getBotAllocation(ctx.botId, ctx.tradingAccountId, "USDT");
+      const existing = memory.getBotAllocation(activationBotId, activationTradingAccountId, "USDT");
       const allocation = capital > 0
         ? memory.ensureBotAllocation({
-            botId: ctx.botId,
-            tradingAccountId: ctx.tradingAccountId,
+            botId: activationBotId,
+            tradingAccountId: activationTradingAccountId,
             asset: "USDT",
             amount: capital,
           })
@@ -158,10 +165,10 @@ registerTool(
         packageId,
         packageVersion,
         mode: targetMode,
-        tradingAccountId: ctx.tradingAccountId,
-        botId: ctx.botId,
+        tradingAccountId: activationTradingAccountId,
+        botId: activationBotId,
         capitalAllocationId: allocation.id,
-        residentTraderId: String(resident_trader_id || "") || ctx.actorId,
+        residentTraderId: residentTrader?.id ?? ctx.actorId,
         runtimePolicy,
         allocatedUsdt: allocation.allocated,
       });

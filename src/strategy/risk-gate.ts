@@ -60,12 +60,13 @@ export class RiskGate {
     const owner = this.store.getStrategy(signal.ruleId);
     const strategyAllocatedUsdt = owner?.allocatedUsdt;
     const strategyUsedUsdt = owner ? this.store.getUsedUsdt(owner.id) : undefined;
+    const ownerBotId = owner?.botId ?? this.botId ?? undefined;
 
     const result = await checkTradeAllowed(
       {
         exchange: this.exchange,
         broker: this.broker,
-        botId: this.botId ?? undefined,
+        botId: ownerBotId,
         riskParams: this.store.riskParams,
         soulMaxPositionPct: this.soulMaxPositionPct,
         maxOrderSizeUsdt: Number.POSITIVE_INFINITY, // rule-defined size; no hard cap here
@@ -81,7 +82,7 @@ export class RiskGate {
     );
 
     // Keep the peak watermark fresh while we're already querying balance/positions
-    this.updatePeakFromLiveState().catch(() => {});
+    this.updatePeakFromLiveState(ownerBotId).catch(() => {});
 
     if (!result.allowed) {
       return { approved: false, signal, reason: result.reason };
@@ -99,14 +100,14 @@ export class RiskGate {
    * Query current portfolio value and lift the watermark if we've set a new high.
    * Called opportunistically after each evaluate().
    */
-  async updatePeakFromLiveState(): Promise<void> {
+  async updatePeakFromLiveState(botId: string | undefined = this.botId ?? undefined): Promise<void> {
     if (!this.memory) return;
     try {
       const balance = this.broker
-        ? await this.broker.fetchBalance(this.botId ?? undefined)
+        ? await this.broker.fetchBalance(botId)
         : await this.exchange?.fetchBalance() ?? {};
       const positions = this.broker
-        ? await this.broker.fetchPositions(this.botId ?? undefined)
+        ? await this.broker.fetchPositions(botId)
         : await this.exchange?.fetchPositions() ?? {};
       const usdtFree = balance.USDT?.free ?? balance.USDT?.total ?? 0;
       let exposure = 0;

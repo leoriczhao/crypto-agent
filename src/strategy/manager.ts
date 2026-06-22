@@ -20,6 +20,8 @@ export function instantiateStrategy(snap: StrategySnapshot): Strategy {
         params: snap.params as SignalStrategyParams,
         enabled: snap.enabled,
         allocatedUsdt: snap.allocatedUsdt,
+        botId: snap.botId,
+        tradingAccountId: snap.tradingAccountId,
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
       });
@@ -30,6 +32,8 @@ export function instantiateStrategy(snap: StrategySnapshot): Strategy {
         params: snap.params as LadderStrategyParams,
         enabled: snap.enabled,
         allocatedUsdt: snap.allocatedUsdt,
+        botId: snap.botId,
+        tradingAccountId: snap.tradingAccountId,
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
       });
@@ -40,6 +44,8 @@ export function instantiateStrategy(snap: StrategySnapshot): Strategy {
         params: snap.params as GridStrategyParams,
         enabled: snap.enabled,
         allocatedUsdt: snap.allocatedUsdt,
+        botId: snap.botId,
+        tradingAccountId: snap.tradingAccountId,
         createdAt: snap.createdAt,
         updatedAt: snap.updatedAt,
       });
@@ -176,6 +182,8 @@ export class StrategyManager extends EventEmitter {
       params: patch.params ?? existing.params,
       enabled: patch.enabled ?? existing.enabled,
       allocatedUsdt: patch.allocatedUsdt ?? existing.allocatedUsdt,
+      botId: existing.botId,
+      tradingAccountId: existing.tradingAccountId,
       createdAt: existing.createdAt,
       updatedAt: now,
     };

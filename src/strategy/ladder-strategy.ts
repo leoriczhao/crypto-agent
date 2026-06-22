@@ -53,6 +53,8 @@ export class LadderStrategy extends Strategy {
     params: LadderStrategyParams;
     enabled?: boolean;
     allocatedUsdt?: number;
+    botId?: string | null;
+    tradingAccountId?: string | null;
     createdAt?: string;
     updatedAt?: string;
   }) {
