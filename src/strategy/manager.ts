@@ -118,6 +118,8 @@ export class StrategyManager extends EventEmitter {
     params: Record<string, any>;
     allocatedUsdt?: number;
     enabled?: boolean;
+    botId?: string | null;
+    tradingAccountId?: string | null;
   }): Strategy {
     const now = new Date().toISOString();
     const snap: StrategySnapshot = {
@@ -127,6 +129,8 @@ export class StrategyManager extends EventEmitter {
       params: input.params,
       enabled: input.enabled ?? true,
       allocatedUsdt: input.allocatedUsdt ?? 0,
+      botId: input.botId ?? null,
+      tradingAccountId: input.tradingAccountId ?? null,
       createdAt: now,
       updatedAt: now,
     };

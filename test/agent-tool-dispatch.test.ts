@@ -13,6 +13,7 @@ describe("dispatchAgentTool", () => {
       getAgent: () => ({} as any),
       getSkillLoader: () => ({} as any),
       getStrategyStore: () => null,
+      getStrategyDeploymentService: () => null,
     } satisfies AgentToolDeps;
 
     await expect(dispatchAgentTool("missing_tool", {}, deps)).resolves.toBe("Unknown tool: missing_tool");

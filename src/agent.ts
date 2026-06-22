@@ -18,6 +18,7 @@ import type { AgentMessage } from "./agent/provider-step.js";
 import { injectEphemeralCurrentState } from "./agent/ephemeral-current-state.js";
 import type { DefaultIdentity, Memory } from "./memory.js";
 import type { StrategyManager } from "./strategy/manager.js";
+import type { StrategyDeploymentService } from "./strategy/deployment-service.js";
 import "./tools/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -56,6 +57,7 @@ export class CryptoAgent {
   sessions: SessionManager;
   memory: Memory | null = null;
   strategyStore: StrategyManager | null = null;
+  strategyDeploymentService: StrategyDeploymentService | null = null;
   broker: Broker | null = null;
   marketData: MarketDataProvider;
   provider: string;
@@ -161,6 +163,7 @@ export class CryptoAgent {
       getAgent: () => this,
       getSkillLoader: () => this.skillLoader,
       getStrategyStore: () => this.strategyStore,
+      getStrategyDeploymentService: () => this.strategyDeploymentService,
     };
   }
 

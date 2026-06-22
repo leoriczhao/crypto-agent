@@ -19,7 +19,8 @@ const REVIEW_PROMPT_TEMPLATE = `You are a trading performance reviewer. Analyze 
 4. Flag any patterns (e.g. consecutive losses, overtrading, poor timing)
 5. If a rule is consistently losing, recommend disabling it
 
-Output your analysis concisely. For parameter changes, use the manage_rules or plan_strategy tools.`;
+Output your analysis concisely. For runtime changes, use manage_rules only to disable or adjust existing running instances.
+For strategy changes, recommend a new strategy package version and deploy_strategy lifecycle action instead of creating a runtime strategy directly.`;
 
 export class TradeReviewer {
   private memory: Memory;

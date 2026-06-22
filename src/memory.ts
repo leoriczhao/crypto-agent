@@ -182,6 +182,11 @@ export type ResidentAgentStatus = "active" | "paused" | "archived";
 export type StrategyMandateStatus = "draft" | "active" | "deprecated";
 export type MandateValidationStatus = "deferred" | "pending" | "validated" | "rejected";
 export type AgentRunStatus = "running" | "completed" | "failed";
+export type StrategyPackageStatus = "draft" | "submitted" | "paper_ready" | "live_ready" | "rejected" | "deprecated";
+export type StrategyPackageValidationStatus = "not_run" | "pending" | "passed" | "failed" | "waived";
+export type StrategyValidationStatus = "pending" | "passed" | "failed" | "waived";
+export type StrategyDeploymentStatus = "proposed" | "active" | "paused" | "stopping" | "stopped" | "archived";
+export type StrategyDeploymentMode = "PAPER" | "LIVE";
 
 export interface StrategyMandateRow {
   id: string;
@@ -237,6 +242,70 @@ export interface AgentRunRow {
   mandateIds: string[];
   startedAt: string;
   finishedAt: string | null;
+}
+
+export interface StrategyPackageRow {
+  id: string;
+  version: number;
+  familyId: string;
+  name: string;
+  status: StrategyPackageStatus;
+  authorAgentId: string | null;
+  authorRunId: string | null;
+  source: string;
+  mandate: Record<string, any>;
+  executableSpec: Record<string, any>;
+  riskPolicy: Record<string, any>;
+  validationStatus: StrategyPackageValidationStatus;
+  validationSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StrategyValidationRow {
+  id: string;
+  packageId: string;
+  packageVersion: number;
+  validatorType: string;
+  status: StrategyValidationStatus;
+  datasetRef: string | null;
+  metrics: Record<string, any>;
+  report: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export interface StrategyDeploymentRow {
+  id: string;
+  packageId: string;
+  packageVersion: number;
+  status: StrategyDeploymentStatus;
+  mode: StrategyDeploymentMode;
+  tradingAccountId: string;
+  botId: string;
+  capitalAllocationId: string;
+  residentTraderId: string | null;
+  runtimePolicy: Record<string, any>;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StrategyInstanceRow {
+  id: string;
+  deploymentId: string;
+  packageId: string;
+  packageVersion: number;
+  kind: string;
+  symbol: string;
+  params: Record<string, any>;
+  enabled: boolean;
+  allocatedUsdt: number;
+  botId: string;
+  tradingAccountId: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DefaultIdentity {
@@ -592,6 +661,79 @@ export class Memory {
         created_by TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_packages (
+        id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        family_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        author_agent_id TEXT,
+        author_run_id TEXT,
+        source TEXT NOT NULL,
+        mandate TEXT NOT NULL,
+        executable_spec TEXT NOT NULL,
+        risk_policy TEXT NOT NULL,
+        validation_status TEXT NOT NULL,
+        validation_summary TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_validations (
+        id TEXT PRIMARY KEY,
+        package_id TEXT NOT NULL,
+        package_version INTEGER NOT NULL,
+        validator_type TEXT NOT NULL,
+        status TEXT NOT NULL,
+        dataset_ref TEXT,
+        metrics TEXT NOT NULL,
+        report TEXT,
+        created_by TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (package_id, package_version) REFERENCES strategy_packages(id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_deployments (
+        id TEXT PRIMARY KEY,
+        package_id TEXT NOT NULL,
+        package_version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        trading_account_id TEXT NOT NULL,
+        bot_id TEXT NOT NULL,
+        capital_allocation_id TEXT NOT NULL,
+        resident_trader_id TEXT,
+        runtime_policy TEXT NOT NULL,
+        started_at TIMESTAMP,
+        stopped_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (package_id, package_version) REFERENCES strategy_packages(id, version),
+        FOREIGN KEY (trading_account_id) REFERENCES trading_accounts(id),
+        FOREIGN KEY (bot_id) REFERENCES trading_bots(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_instances (
+        id TEXT PRIMARY KEY,
+        deployment_id TEXT NOT NULL,
+        package_id TEXT NOT NULL,
+        package_version INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        params TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        allocated_usdt REAL NOT NULL DEFAULT 0,
+        bot_id TEXT NOT NULL,
+        trading_account_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (deployment_id) REFERENCES strategy_deployments(id),
+        FOREIGN KEY (package_id, package_version) REFERENCES strategy_packages(id, version),
+        FOREIGN KEY (bot_id) REFERENCES trading_bots(id),
+        FOREIGN KEY (trading_account_id) REFERENCES trading_accounts(id)
       );
 
       CREATE TABLE IF NOT EXISTS resident_agents (
@@ -1714,6 +1856,380 @@ export class Memory {
       realizedPnl: r.realized_pnl,
       createdAt: r.created_at,
     }));
+  }
+
+  // --- Strategy packages, validation, deployments, and instances ---
+
+  createStrategyPackage(input: {
+    id?: string;
+    version?: number;
+    familyId?: string;
+    name: string;
+    status?: StrategyPackageStatus;
+    authorAgentId?: string | null;
+    authorRunId?: string | null;
+    source: string;
+    mandate: Record<string, any>;
+    executableSpec: Record<string, any>;
+    riskPolicy: Record<string, any>;
+    validationStatus?: StrategyPackageValidationStatus;
+    validationSummary?: string | null;
+  }): StrategyPackageRow {
+    const id = input.id ?? randomUUID();
+    const version = input.version ?? 1;
+    this.db
+      .prepare(
+        `INSERT INTO strategy_packages
+         (id, version, family_id, name, status, author_agent_id, author_run_id, source, mandate, executable_spec, risk_policy, validation_status, validation_summary)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        version,
+        input.familyId ?? id,
+        input.name,
+        input.status ?? "draft",
+        input.authorAgentId ?? null,
+        input.authorRunId ?? null,
+        input.source,
+        JSON.stringify(input.mandate ?? {}),
+        JSON.stringify(input.executableSpec ?? {}),
+        JSON.stringify(input.riskPolicy ?? {}),
+        input.validationStatus ?? "not_run",
+        input.validationSummary ?? null,
+      );
+    return this.getStrategyPackage(id, version)!;
+  }
+
+  getStrategyPackage(id: string, version = 1): StrategyPackageRow | null {
+    const row = this.db
+      .prepare("SELECT * FROM strategy_packages WHERE id = ? AND version = ?")
+      .get(id, version) as any | undefined;
+    return row ? this.rowToStrategyPackage(row) : null;
+  }
+
+  listStrategyPackages(input: { familyId?: string; status?: StrategyPackageStatus } = {}): StrategyPackageRow[] {
+    const clauses: string[] = [];
+    const values: any[] = [];
+    if (input.familyId) {
+      clauses.push("family_id = ?");
+      values.push(input.familyId);
+    }
+    if (input.status) {
+      clauses.push("status = ?");
+      values.push(input.status);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM strategy_packages ${where} ORDER BY family_id ASC, version ASC`)
+      .all(...values) as any[];
+    return rows.map((r) => this.rowToStrategyPackage(r));
+  }
+
+  setStrategyPackageStatus(id: string, version: number, status: StrategyPackageStatus): void {
+    this.db
+      .prepare("UPDATE strategy_packages SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?")
+      .run(status, id, version);
+  }
+
+  setStrategyPackageValidation(
+    id: string,
+    version: number,
+    validationStatus: StrategyPackageValidationStatus,
+    validationSummary?: string | null,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE strategy_packages
+         SET validation_status = ?, validation_summary = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND version = ?`,
+      )
+      .run(validationStatus, validationSummary ?? null, id, version);
+  }
+
+  private rowToStrategyPackage(r: any): StrategyPackageRow {
+    return {
+      id: r.id,
+      version: r.version,
+      familyId: r.family_id,
+      name: r.name,
+      status: r.status,
+      authorAgentId: r.author_agent_id ?? null,
+      authorRunId: r.author_run_id ?? null,
+      source: r.source,
+      mandate: this.parseJson<Record<string, any>>(r.mandate, {}),
+      executableSpec: this.parseJson<Record<string, any>>(r.executable_spec, {}),
+      riskPolicy: this.parseJson<Record<string, any>>(r.risk_policy, {}),
+      validationStatus: r.validation_status,
+      validationSummary: r.validation_summary ?? null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  createStrategyValidation(input: {
+    id?: string;
+    packageId: string;
+    packageVersion: number;
+    validatorType: string;
+    status: StrategyValidationStatus;
+    datasetRef?: string | null;
+    metrics: Record<string, any>;
+    report?: string | null;
+    createdBy?: string | null;
+  }): StrategyValidationRow {
+    const id = input.id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO strategy_validations
+         (id, package_id, package_version, validator_type, status, dataset_ref, metrics, report, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.packageId,
+        input.packageVersion,
+        input.validatorType,
+        input.status,
+        input.datasetRef ?? null,
+        JSON.stringify(input.metrics ?? {}),
+        input.report ?? null,
+        input.createdBy ?? null,
+      );
+    return this.getStrategyValidation(id)!;
+  }
+
+  getStrategyValidation(id: string): StrategyValidationRow | null {
+    const row = this.db.prepare("SELECT * FROM strategy_validations WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToStrategyValidation(row) : null;
+  }
+
+  listStrategyValidations(packageId: string, packageVersion: number): StrategyValidationRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM strategy_validations
+         WHERE package_id = ? AND package_version = ?
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .all(packageId, packageVersion) as any[];
+    return rows.map((r) => this.rowToStrategyValidation(r));
+  }
+
+  private rowToStrategyValidation(r: any): StrategyValidationRow {
+    return {
+      id: r.id,
+      packageId: r.package_id,
+      packageVersion: r.package_version,
+      validatorType: r.validator_type,
+      status: r.status,
+      datasetRef: r.dataset_ref ?? null,
+      metrics: this.parseJson<Record<string, any>>(r.metrics, {}),
+      report: r.report ?? null,
+      createdBy: r.created_by ?? null,
+      createdAt: r.created_at,
+    };
+  }
+
+  createStrategyDeployment(input: {
+    id?: string;
+    packageId: string;
+    packageVersion: number;
+    status?: StrategyDeploymentStatus;
+    mode: StrategyDeploymentMode;
+    tradingAccountId: string;
+    botId: string;
+    capitalAllocationId: string;
+    residentTraderId?: string | null;
+    runtimePolicy?: Record<string, any>;
+    startedAt?: string | null;
+    stoppedAt?: string | null;
+  }): StrategyDeploymentRow {
+    const id = input.id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO strategy_deployments
+         (id, package_id, package_version, status, mode, trading_account_id, bot_id, capital_allocation_id, resident_trader_id, runtime_policy, started_at, stopped_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.packageId,
+        input.packageVersion,
+        input.status ?? "proposed",
+        input.mode,
+        input.tradingAccountId,
+        input.botId,
+        input.capitalAllocationId,
+        input.residentTraderId ?? null,
+        JSON.stringify(input.runtimePolicy ?? {}),
+        input.startedAt ?? null,
+        input.stoppedAt ?? null,
+      );
+    return this.getStrategyDeployment(id)!;
+  }
+
+  getStrategyDeployment(id: string): StrategyDeploymentRow | null {
+    const row = this.db.prepare("SELECT * FROM strategy_deployments WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToStrategyDeployment(row) : null;
+  }
+
+  listStrategyDeployments(input: { status?: StrategyDeploymentStatus; mode?: StrategyDeploymentMode } = {}): StrategyDeploymentRow[] {
+    const clauses: string[] = [];
+    const values: any[] = [];
+    if (input.status) {
+      clauses.push("status = ?");
+      values.push(input.status);
+    }
+    if (input.mode) {
+      clauses.push("mode = ?");
+      values.push(input.mode);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db
+      .prepare(`SELECT * FROM strategy_deployments ${where} ORDER BY created_at ASC, id ASC`)
+      .all(...values) as any[];
+    return rows.map((r) => this.rowToStrategyDeployment(r));
+  }
+
+  updateStrategyDeployment(
+    id: string,
+    patch: {
+      status?: StrategyDeploymentStatus;
+      startedAt?: string | null;
+      stoppedAt?: string | null;
+      runtimePolicy?: Record<string, any>;
+    },
+  ): void {
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (patch.status !== undefined) {
+      fields.push("status = ?");
+      values.push(patch.status);
+    }
+    if (patch.startedAt !== undefined) {
+      fields.push("started_at = ?");
+      values.push(patch.startedAt);
+    }
+    if (patch.stoppedAt !== undefined) {
+      fields.push("stopped_at = ?");
+      values.push(patch.stoppedAt);
+    }
+    if (patch.runtimePolicy !== undefined) {
+      fields.push("runtime_policy = ?");
+      values.push(JSON.stringify(patch.runtimePolicy));
+    }
+    if (!fields.length) return;
+    fields.push("updated_at = CURRENT_TIMESTAMP");
+    values.push(id);
+    this.db.prepare(`UPDATE strategy_deployments SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+  }
+
+  private rowToStrategyDeployment(r: any): StrategyDeploymentRow {
+    return {
+      id: r.id,
+      packageId: r.package_id,
+      packageVersion: r.package_version,
+      status: r.status,
+      mode: r.mode,
+      tradingAccountId: r.trading_account_id,
+      botId: r.bot_id,
+      capitalAllocationId: r.capital_allocation_id,
+      residentTraderId: r.resident_trader_id ?? null,
+      runtimePolicy: this.parseJson<Record<string, any>>(r.runtime_policy, {}),
+      startedAt: r.started_at ?? null,
+      stoppedAt: r.stopped_at ?? null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+
+  createStrategyInstance(input: {
+    id?: string;
+    deploymentId: string;
+    packageId: string;
+    packageVersion: number;
+    kind: string;
+    symbol: string;
+    params: Record<string, any>;
+    enabled?: boolean;
+    allocatedUsdt?: number;
+    botId: string;
+    tradingAccountId: string;
+  }): StrategyInstanceRow {
+    const id = input.id ?? randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO strategy_instances
+         (id, deployment_id, package_id, package_version, kind, symbol, params, enabled, allocated_usdt, bot_id, trading_account_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.deploymentId,
+        input.packageId,
+        input.packageVersion,
+        input.kind,
+        input.symbol,
+        JSON.stringify(input.params ?? {}),
+        input.enabled === false ? 0 : 1,
+        input.allocatedUsdt ?? 0,
+        input.botId,
+        input.tradingAccountId,
+      );
+    return this.getStrategyInstance(id)!;
+  }
+
+  getStrategyInstance(id: string): StrategyInstanceRow | null {
+    const row = this.db.prepare("SELECT * FROM strategy_instances WHERE id = ?").get(id) as any | undefined;
+    return row ? this.rowToStrategyInstance(row) : null;
+  }
+
+  listStrategyInstances(deploymentId?: string): StrategyInstanceRow[] {
+    const rows = deploymentId
+      ? this.db
+          .prepare("SELECT * FROM strategy_instances WHERE deployment_id = ? ORDER BY created_at ASC, id ASC")
+          .all(deploymentId)
+      : this.db.prepare("SELECT * FROM strategy_instances ORDER BY created_at ASC, id ASC").all();
+    return (rows as any[]).map((r) => this.rowToStrategyInstance(r));
+  }
+
+  updateStrategyInstance(id: string, patch: { enabled?: boolean; allocatedUsdt?: number; params?: Record<string, any> }): void {
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (patch.enabled !== undefined) {
+      fields.push("enabled = ?");
+      values.push(patch.enabled ? 1 : 0);
+    }
+    if (patch.allocatedUsdt !== undefined) {
+      fields.push("allocated_usdt = ?");
+      values.push(patch.allocatedUsdt);
+    }
+    if (patch.params !== undefined) {
+      fields.push("params = ?");
+      values.push(JSON.stringify(patch.params));
+    }
+    if (!fields.length) return;
+    fields.push("updated_at = CURRENT_TIMESTAMP");
+    values.push(id);
+    this.db.prepare(`UPDATE strategy_instances SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+  }
+
+  private rowToStrategyInstance(r: any): StrategyInstanceRow {
+    return {
+      id: r.id,
+      deploymentId: r.deployment_id,
+      packageId: r.package_id,
+      packageVersion: r.package_version,
+      kind: r.kind,
+      symbol: r.symbol,
+      params: this.parseJson<Record<string, any>>(r.params, {}),
+      enabled: Boolean(r.enabled),
+      allocatedUsdt: r.allocated_usdt,
+      botId: r.bot_id,
+      tradingAccountId: r.trading_account_id,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
   }
 
   // --- Resident agents and strategy mandates ---

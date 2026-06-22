@@ -31,7 +31,7 @@ function normalizeRiskPolicy(value: unknown): Record<string, any> {
 
 registerTool(
   "resident_agent",
-  "Manage long-lived resident agents. Actions: spawn, status, pause, resume. Trader agents require an active strategy mandate and a capital allocation.",
+  "Manage long-lived resident agents. Actions: spawn, status, pause, resume. Trader agents supervise strategy packages/deployments and require a capital allocation.",
   {
     type: "object",
     properties: {
@@ -39,12 +39,12 @@ registerTool(
       agent_id: { type: "string", description: "Resident agent id for pause/resume" },
       type: { type: "string", enum: ["trader", "researcher", "risk_monitor", "strategist"], default: "trader" },
       name: { type: "string", description: "Resident agent name for spawn" },
-      mandate_id: { type: "string", description: "Active strategy mandate id assigned to the agent" },
+      mandate_id: { type: "string", description: "Optional legacy strategy mandate id assigned to the agent" },
       interval_minutes: { type: "integer", default: 30 },
       capital_usdt: { type: "number", description: "USDT allocated to the resident trader's dedicated bot" },
       symbols: { type: "array", items: { type: "string" }, description: "Allowed market universe for the assignment" },
       risk_policy: { type: "object", description: "Runtime risk limits, e.g. max_leverage/max_total_notional_usdt" },
-      instructions: { type: "string", description: "Long-term role instructions. Strategy logic belongs in the assigned mandate." },
+      instructions: { type: "string", description: "Long-term role instructions. Strategy logic belongs in strategy packages and deployments." },
     },
   },
   ["memory", "sessionId"],
@@ -82,8 +82,8 @@ registerTool(
 
         const mandateId = String(mandate_id || "").trim();
         const mandate = mandateId ? memory.getStrategyMandate(mandateId) : null;
-        if (agentType === "trader" && (!mandate || mandate.status !== "active")) {
-          return "Error: an active strategy mandate is required before spawning a trader agent.";
+        if (mandateId && (!mandate || mandate.status !== "active")) {
+          return "Error: legacy mandate_id was provided but is not an active strategy mandate.";
         }
 
         const parentCtx = resolveToolTradingContext(memory, sessionId);
@@ -103,6 +103,11 @@ registerTool(
           : null;
         const minutes = parsePositiveInteger(interval_minutes, 30);
         const scheduleExpr = `every_${minutes}m`;
+        const policy = normalizeRiskPolicy(risk_policy);
+        const allowedSymbols = normalizeSymbols(symbols);
+        if (agentType === "trader" && allowedSymbols.length && !policy.allowed_symbols) {
+          policy.allowed_symbols = allowedSymbols;
+        }
         const agent = memory.createResidentAgent({
           type: agentType,
           name: agentName,
@@ -111,9 +116,9 @@ registerTool(
           capitalAllocationId: allocation?.id ?? null,
           scheduleExpr,
           nextRun: nextRunFromSchedule(scheduleExpr),
-          mandate: String(instructions || "").trim() || "Follow assigned mandates. Hold when the edge is unclear.",
-          toolPolicy: `${agentType}.v1`,
-          riskPolicy: normalizeRiskPolicy(risk_policy),
+          mandate: String(instructions || "").trim() || "Supervise strategy package deployments. Hold or pause when the edge is unclear.",
+          toolPolicy: `${agentType}.v2`,
+          riskPolicy: policy,
         });
 
         if (mandate) {
@@ -132,21 +137,27 @@ registerTool(
           `allocation=${agent.capitalAllocationId ?? "none"}`,
           `schedule=${agent.scheduleExpr}`,
           `next_run=${agent.nextRun ?? "none"}`,
-          `mandate=${mandate?.id ?? "none"}`,
+          `packages=all_allowed`,
+          `legacy_mandate=${mandate?.id ?? "none"}`,
         ].join("\n");
       }
 
       const agents = memory.listResidentAgents();
       if (!agents.length) return "No resident agents.";
-      const lines = ["Resident Agents:", "ID | Status | Type | Bot | Schedule | Mandates", "-".repeat(90)];
+      const lines = ["Resident Agents:", "ID | Status | Type | Bot | Schedule | Deployments | Legacy Mandates", "-".repeat(120)];
       for (const agent of agents) {
         const assignments = memory
           .listAgentMandateAssignments(agent.id, { activeOnly: true })
           .map((a: any) => a.mandateId)
           .join(", ") || "-";
+        const deployments = memory
+          .listStrategyDeployments()
+          .filter((d: any) => d.residentTraderId === agent.id || d.botId === agent.botId)
+          .map((d: any) => `${d.id}:${d.status}`)
+          .join(", ") || "-";
         const runs = memory.listAgentRuns(agent.id, 1);
         const lastRun = runs[0] ? ` last_run=${runs[0].status}` : "";
-        lines.push(`${agent.id} | ${agent.status} | ${agent.type} | ${agent.botId} | ${agent.scheduleExpr ?? "-"} | ${assignments}${lastRun}`);
+        lines.push(`${agent.id} | ${agent.status} | ${agent.type} | ${agent.botId} | ${agent.scheduleExpr ?? "-"} | ${deployments} | ${assignments}${lastRun}`);
       }
       return lines.join("\n");
     } catch (e: any) {

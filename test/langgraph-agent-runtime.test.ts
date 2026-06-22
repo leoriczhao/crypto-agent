@@ -99,6 +99,7 @@ describe("LangGraph agent runtime", () => {
       getAgent: () => ({} as any),
       getSkillLoader: () => ({} as any),
       getStrategyStore: () => null,
+      getStrategyDeploymentService: () => null,
     } satisfies AgentToolDeps;
 
     try {

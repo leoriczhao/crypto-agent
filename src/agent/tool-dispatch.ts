@@ -5,6 +5,7 @@ import type { ExchangeManager } from "../exchange/manager.js";
 import type { Memory } from "../memory.js";
 import type { SkillLoader } from "../skill-loader.js";
 import type { StrategyManager } from "../strategy/manager.js";
+import type { StrategyDeploymentService } from "../strategy/deployment-service.js";
 import type { Broker } from "../broker/types.js";
 import type { MarketDataProvider } from "../market-data/types.js";
 
@@ -20,6 +21,7 @@ export interface AgentToolDeps {
   getAgent: () => CryptoAgent;
   getSkillLoader: () => SkillLoader;
   getStrategyStore: () => StrategyManager | null;
+  getStrategyDeploymentService: () => StrategyDeploymentService | null;
 }
 
 export async function dispatchAgentTool(
@@ -42,6 +44,7 @@ export async function dispatchAgentTool(
     agent: deps.getAgent,
     skill_loader: deps.getSkillLoader,
     strategy_store: deps.getStrategyStore,
+    strategy_deployment_service: deps.getStrategyDeploymentService,
   };
 
   const resolved: Record<string, unknown> = {};

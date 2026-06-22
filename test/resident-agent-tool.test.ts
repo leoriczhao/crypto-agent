@@ -76,7 +76,7 @@ describe("resident_agent tool", () => {
     });
   });
 
-  test("refuses to spawn a trader without an active strategy mandate", async () => {
+  test("refuses to spawn a trader with an invalid legacy mandate id", async () => {
     await import("../src/tools/index.js");
     const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
     const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
@@ -87,13 +87,46 @@ describe("resident_agent tool", () => {
       sessionId: "user-session",
       action: "spawn",
       type: "trader",
-      name: "No Mandate Trader",
+      name: "Invalid Legacy Mandate Trader",
+      mandate_id: "missing-mandate",
       interval_minutes: 30,
       capital_usdt: 2000,
     });
 
     expect(result).toContain("Error");
-    expect(result).toContain("active strategy mandate");
+    expect(result).toContain("legacy mandate_id");
     expect(memory.listResidentAgents()).toHaveLength(0);
+  });
+
+  test("spawns a resident trader without a legacy mandate", async () => {
+    await import("../src/tools/index.js");
+    const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    memory.createSession("user-session", "user", "user", identity.bot.id);
+
+    const result = await TOOL_HANDLERS.resident_agent({
+      memory,
+      sessionId: "user-session",
+      action: "spawn",
+      type: "trader",
+      name: "Package Trader",
+      capital_usdt: 300,
+      interval_minutes: 30,
+      symbols: ["BTC/USDT:USDT", "ETH/USDT:USDT"],
+      instructions: "Supervise validated strategy package deployments.",
+    });
+
+    expect(result).toContain("Resident agent created");
+    expect(result).toContain("packages=all_allowed");
+    const agent = memory.listResidentAgents({ type: "trader" })[0];
+    expect(agent).toMatchObject({
+      type: "trader",
+      name: "Package Trader",
+      status: "active",
+      tradingAccountId: identity.tradingAccount.id,
+      scheduleExpr: "every_30m",
+    });
+    expect(agent.capitalAllocationId).toBeTruthy();
+    expect(memory.listAgentMandateAssignments(agent.id, { activeOnly: true })).toHaveLength(0);
   });
 });

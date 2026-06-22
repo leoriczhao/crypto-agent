@@ -73,13 +73,23 @@ describe("strategy_kb persistence", () => {
 });
 
 describe("strategist role registration", () => {
-  test("strategist role exists with kb_log + kb_search tools", () => {
+  test("strategist role uses strategy packages instead of direct runtime strategy tools", () => {
     expect(ROLES.strategist).toBeDefined();
     const runner = new SubAgentRunner("strategist");
     expect(runner.allowedTools).toContain("kb_search");
     expect(runner.allowedTools).toContain("kb_log");
     expect(runner.allowedTools).toContain("backtest");
-    expect(runner.allowedTools).toContain("plan_strategy");
+    expect(runner.allowedTools).toContain("strategy_package");
+    expect(runner.allowedTools).toContain("validate_strategy");
+    expect(runner.allowedTools).not.toContain("plan_strategy");
+    expect(runner.allowedTools).not.toContain("plan_grid_strategy");
+    expect(runner.allowedTools).not.toContain("plan_ladder_strategy");
+    expect(runner.systemPrompt).toContain("strategy_package.create");
+    expect(runner.systemPrompt).toContain("at least 10 trades");
+    expect(runner.systemPrompt).toContain("Sharpe > 0.3");
+    expect(runner.systemPrompt).toContain("max drawdown < 25%");
+    expect(runner.systemPrompt).toContain("validate_strategy.waive_for_paper");
+    expect(runner.systemPrompt).not.toContain("plan_strategy");
   });
 
   test("strategist has higher turn budget than default", () => {

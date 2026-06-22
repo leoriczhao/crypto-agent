@@ -8,6 +8,7 @@ import { TOOL_HANDLERS } from "./tools/registry.js";
 import type { SessionType } from "./session.js";
 import { MarketFeed } from "./market-feed.js";
 import { StrategyManager } from "./strategy/manager.js";
+import { StrategyDeploymentService } from "./strategy/deployment-service.js";
 import { StrategyRuntime } from "./strategy/runtime.js";
 import { SignalStrategy } from "./strategy/signal-strategy.js";
 import { RiskGate } from "./strategy/risk-gate.js";
@@ -40,6 +41,7 @@ class CryptoDaemon {
 
   // Fast path
   private strategyStore: StrategyManager;
+  private deploymentService: StrategyDeploymentService;
   private marketFeed: MarketFeed | null = null;
   private runtime: StrategyRuntime | null = null;
   private riskGate: RiskGate | null = null;
@@ -68,6 +70,12 @@ class CryptoDaemon {
 
     this.strategyStore = new StrategyManager(this.memory);
     this.agent.strategyStore = this.strategyStore;
+    this.deploymentService = new StrategyDeploymentService({
+      memory: this.memory,
+      manager: this.strategyStore,
+      runtime: null,
+    });
+    this.agent.strategyDeploymentService = this.deploymentService;
 
     this.systemSessionId = this.ensureSession("system", "system");
     this.userSessionId = this.ensureSession("user", "user");
@@ -169,6 +177,7 @@ class CryptoDaemon {
         exchange: liveExchange,
         broker,
       });
+      this.deploymentService.setRuntime(this.runtime);
       this.executor = new OrderExecutor({
         marketData: this.agent.marketData,
         exchange: liveExchange,
@@ -699,6 +708,8 @@ class CryptoDaemon {
     // against the exchange's open-orders list so we know whether it filled while
     // the daemon was down.
     await this.reconcilePendingOrders();
+
+    this.deploymentService.startActiveDeployments();
 
     const strategies = this.strategyStore.getActiveStrategies();
     const symbols = [...new Set([

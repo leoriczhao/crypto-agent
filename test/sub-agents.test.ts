@@ -1,6 +1,8 @@
 import { describe, test, expect } from "vitest";
 import "../src/tools/index.js";
-import { ROLES, SubAgentRunner } from "../src/sub-agents.js";
+import { ROLES, SubAgentRunner, runSubAgent } from "../src/sub-agents.js";
+import { TOOL_DEFINITIONS } from "../src/tools/registry.js";
+import { Memory } from "../src/memory.js";
 
 describe("ROLES", () => {
   test("all roles defined", () => {
@@ -70,5 +72,102 @@ describe("SubAgentRunner", () => {
     const handlers = runner.getToolHandlers();
     expect("assess_risk" in handlers).toBe(true);
     expect("buy" in handlers).toBe(false);
+  });
+
+  test("delegate describes package-first strategist workflow", () => {
+    const delegate = TOOL_DEFINITIONS.find((tool) => tool.name === "delegate");
+    expect(delegate?.description).toContain("strategy package");
+    expect(delegate?.description).not.toContain("commit rule");
+  });
+
+  test("strategist sub-agent injects market data into validate_strategy", async () => {
+    const memory = new Memory(":memory:");
+    memory.createStrategyPackage({
+      id: "btc_signal",
+      version: 1,
+      familyId: "btc_signal",
+      name: "BTC Signal",
+      status: "submitted",
+      source: "researcher",
+      mandate: "Validate a signal package.",
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "1h",
+        side: "long",
+        entry: [{ indicator: "price_level", operator: "gt", value: 100 }],
+        exit: [{ indicator: "price_level", operator: "gt", value: 105 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 3,
+        takeProfitPct: 5,
+      },
+      riskPolicy: { maxLeverage: 3, maxSingleNotionalUsdt: 50, maxTotalNotionalUsdt: 300 },
+    });
+    const closes: number[] = [];
+    for (let i = 0; i < 60; i++) closes.push(99, 101, 107, 95);
+    const marketData = {
+      fetchOhlcv: async () => closes.map((close, i) => ({
+        timestamp: i * 3600000,
+        open: close,
+        high: close * 1.01,
+        low: close * 0.99,
+        close,
+        volume: 1000,
+      })),
+    };
+    let calls = 0;
+    const agent = {
+      provider: "openai",
+      memory,
+      marketData,
+      client: {
+        chat: {
+          completions: {
+            create: async ({ messages }: any) => {
+              calls++;
+              if (calls === 1) {
+                return {
+                  choices: [{
+                    finish_reason: "tool_calls",
+                    message: {
+                      content: null,
+                      tool_calls: [{
+                        id: "call-1",
+                        type: "function",
+                        function: {
+                          name: "validate_strategy",
+                          arguments: JSON.stringify({
+                            action: "run",
+                            package_id: "btc_signal",
+                            package_version: 1,
+                          }),
+                        },
+                      }],
+                    },
+                  }],
+                  usage: {},
+                };
+              }
+              const toolMessage = messages.findLast((m: any) => m.role === "tool");
+              return {
+                choices: [{
+                  finish_reason: "stop",
+                  message: { content: toolMessage.content },
+                }],
+                usage: {},
+              };
+            },
+          },
+        },
+      },
+    } as any;
+
+    try {
+      const result = await runSubAgent(agent, "session-1", "strategist", "validate btc_signal");
+
+      expect(result).toContain("validation=passed");
+    } finally {
+      memory.close();
+    }
   });
 });

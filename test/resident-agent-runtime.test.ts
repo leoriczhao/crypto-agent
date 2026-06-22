@@ -26,25 +26,36 @@ describe("ResidentAgentRuntime", () => {
     expect(nextRunFromSchedule("bad", Date.parse("2026-01-01T00:00:00.000Z"))).toBeNull();
   });
 
-  test("refuses to run a trader with no active strategy mandate assignment", async () => {
+  test("runs an active resident trader without legacy mandates", async () => {
     const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
     const resident = memory.createResidentAgent({
-      id: "trader-no-mandate",
+      id: "resident-package-trader",
       type: "trader",
-      name: "No Mandate Trader",
+      name: "Package Trader",
       botId: identity.bot.id,
       tradingAccountId: identity.tradingAccount.id,
+      mandate: "Supervise strategy package deployments.",
+      toolPolicy: "trader.v2",
+      riskPolicy: { maxLeverage: 3 },
     });
     const agent = {
       sessions: new SessionManager(),
-      chatInSession: vi.fn(),
+      chatInSession: vi.fn().mockResolvedValue("PAPER run report: hold."),
     } as any;
 
     const runtime = new ResidentAgentRuntime({ memory, agent });
 
-    await expect(runtime.runAgent(resident.id, "manual")).rejects.toThrow(/no active assigned strategy mandate/);
-    expect(agent.chatInSession).not.toHaveBeenCalled();
-    expect(memory.listAgentRuns(resident.id)).toHaveLength(0);
+    const result = await runtime.runAgent(resident.id, "manual");
+
+    expect(result.run).toMatchObject({
+      agentId: resident.id,
+      status: "completed",
+      mandateIds: [],
+    });
+    expect(agent.chatInSession).toHaveBeenCalledWith(
+      resident.sessionId,
+      expect.stringContaining("Strategy Package Context"),
+    );
   });
 
   test("runs an active resident trader and completes its run record", async () => {
@@ -91,7 +102,77 @@ describe("ResidentAgentRuntime", () => {
       status: "completed",
       mandateIds: ["trend_pullback_v1"],
     });
-    expect(agent.chatInSession).toHaveBeenCalledWith(resident.sessionId, expect.stringContaining("Assigned Strategy Mandates"));
+    expect(agent.chatInSession).toHaveBeenCalledWith(resident.sessionId, expect.stringContaining("Legacy Strategy Mandates"));
     expect(memory.loadRecentMessages(resident.sessionId, 10).map((m) => m.role)).toEqual(["user", "assistant"]);
+  });
+
+  test("resident trader prompt includes active deployments", async () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const allocation = memory.ensureBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      amount: 300,
+    });
+    const resident = memory.createResidentAgent({
+      id: "resident-package-trader",
+      type: "trader",
+      name: "Package Trader",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      capitalAllocationId: allocation.id,
+      mandate: "Supervise strategy package deployments.",
+      toolPolicy: "trader.v2",
+      riskPolicy: { maxLeverage: 3 },
+    });
+    memory.createStrategyPackage({
+      id: "btc_signal",
+      version: 1,
+      familyId: "btc_signal",
+      name: "BTC Signal",
+      status: "paper_ready",
+      source: "researcher",
+      mandate: "Trade BTC only when condition evidence is valid.",
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "1h",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 35 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 55 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 3,
+        takeProfitPct: 5,
+      },
+      riskPolicy: { maxLeverage: 3, maxSingleNotionalUsdt: 50, maxTotalNotionalUsdt: 300 },
+      validationStatus: "waived",
+      validationSummary: "Paper smoke waiver.",
+    });
+    memory.createStrategyDeployment({
+      id: "deploy-btc",
+      packageId: "btc_signal",
+      packageVersion: 1,
+      status: "active",
+      mode: "PAPER",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      capitalAllocationId: allocation.id,
+      residentTraderId: resident.id,
+      runtimePolicy: {},
+    });
+
+    const agent = {
+      sessions: new SessionManager(),
+      chatInSession: vi.fn().mockResolvedValue("PAPER run report: hold."),
+    } as any;
+    const runtime = new ResidentAgentRuntime({ memory, agent });
+
+    await runtime.runAgent(resident.id, "manual");
+
+    const prompt = vi.mocked(agent.chatInSession).mock.calls[0][1];
+    expect(prompt).toContain("Strategy Package Context");
+    expect(prompt).toContain("Active Deployments");
+    expect(prompt).toContain("deploy-btc");
+    expect(prompt).toContain("btc_signal@1");
   });
 });

@@ -4,7 +4,9 @@ import type {
   AgentRunRow,
   Memory,
   ResidentAgentRow,
+  StrategyDeploymentRow,
   StrategyMandateRow,
+  StrategyPackageRow,
 } from "../memory.js";
 
 export interface ResidentAgentRuntimeOptions {
@@ -35,12 +37,13 @@ function roleContract(agent: ResidentAgentRow): string {
   if (agent.type === "trader") {
     return [
       "You are a Resident Trader Agent.",
-      "Execute only assigned active strategy mandates.",
+      "Supervise strategy package deployments owned by your bot and capital allocation.",
       "Operate only inside the assigned capital allocation and risk policy.",
-      "Use contract trading tools only when the mandate, evidence, and risk policy all permit it.",
+      "Activate only packages whose status, validation evidence, and risk policy permit the target mode.",
+      "Use deploy_strategy to activate, pause, resume, stop, or inspect deterministic runtime deployments.",
       "Do not create schedules, spawn agents, or modify your own policy.",
-      "Choose exactly one final action category for this run: open, close, adjust, hold.",
-      "If the edge is unclear or the mandate is not satisfied, hold is the correct action.",
+      "Choose exactly one final action category for this run: activate, pause, stop, revise_request, or hold.",
+      "If the edge is unclear, validation is weak, or risk is outside policy, hold or pause is the correct action.",
     ].join("\n");
   }
   if (agent.type === "researcher") {
@@ -48,7 +51,7 @@ function roleContract(agent: ResidentAgentRow): string {
       "You are a Resident Research Agent.",
       "Research assigned markets and produce concise findings for future trader runs.",
       "You do not place orders.",
-      "If you propose a strategy mandate, mark it as a draft idea requiring later validation.",
+      "If you propose a strategy, create a strategy package draft or submitted package requiring validation.",
     ].join("\n");
   }
   return [
@@ -60,7 +63,7 @@ function roleContract(agent: ResidentAgentRow): string {
 function formatMandates(
   mandates: Array<{ mandate: StrategyMandateRow; assignment: AgentMandateAssignmentRow }>,
 ): string {
-  if (!mandates.length) return "No assigned strategy mandates.";
+  if (!mandates.length) return "No legacy strategy mandates assigned.";
   return mandates.map(({ mandate, assignment }) => [
     `- ${mandate.id} v${mandate.version} (${mandate.status}, validation=${mandate.validationStatus})`,
     `  name: ${mandate.name}`,
@@ -70,10 +73,61 @@ function formatMandates(
   ].join("\n")).join("\n");
 }
 
+function clip(value: string, max = 180): string {
+  return value.length > max ? `${value.slice(0, max - 1)}...` : value;
+}
+
+function formatStrategyPackages(packages: StrategyPackageRow[]): string {
+  if (!packages.length) return "No strategy packages exist yet.";
+  return packages.slice(0, 20).map((pkg) => [
+    `- ${pkg.id}@${pkg.version} (${pkg.status}, validation=${pkg.validationStatus})`,
+    `  name: ${pkg.name}`,
+    `  source: ${pkg.source}`,
+    `  summary: ${clip(typeof pkg.mandate === "string" ? pkg.mandate : JSON.stringify(pkg.mandate))}`,
+    `  risk_policy: ${JSON.stringify(pkg.riskPolicy)}`,
+  ].join("\n")).join("\n");
+}
+
+function formatDeployments(deployments: StrategyDeploymentRow[]): string {
+  if (!deployments.length) return "No deployments currently associated with this resident trader or bot.";
+  return deployments.map((deployment) => [
+    `- ${deployment.id} (${deployment.status}, ${deployment.mode})`,
+    `  package: ${deployment.packageId}@${deployment.packageVersion}`,
+    `  bot: ${deployment.botId}`,
+    `  trading_account: ${deployment.tradingAccountId}`,
+    `  allocation: ${deployment.capitalAllocationId}`,
+    `  resident_trader: ${deployment.residentTraderId ?? "n/a"}`,
+  ].join("\n")).join("\n");
+}
+
+function runInstructions(agent: ResidentAgentRow): string[] {
+  if (agent.type === "trader") {
+    return [
+      "Inspect current portfolio, positions, deployments, validation evidence, and risk state.",
+      "For an undeployed package, use deploy_strategy only when package status and validation allow the target mode.",
+      "For an active deployment, decide whether to hold, pause, resume, stop, or request a package revision.",
+      "Do not improvise a new trade outside the package/deployment/risk-policy boundary.",
+      "End with a concise run report: observations, deployment decision, final action, risk state, and tool results.",
+    ];
+  }
+  if (agent.type === "researcher") {
+    return [
+      "Inspect market context, prior package outcomes, and research KB before proposing changes.",
+      "Create strategy packages for reusable strategy logic; do not place orders.",
+      "End with concise findings, rejected hypotheses, package changes, and validation needs.",
+    ];
+  }
+  return [
+    "Follow your mandate, inspect relevant state, and end with a concise run report.",
+  ];
+}
+
 function buildRunPrompt(opts: {
   agent: ResidentAgentRow;
   trigger: string;
   mandates: Array<{ mandate: StrategyMandateRow; assignment: AgentMandateAssignmentRow }>;
+  packages: StrategyPackageRow[];
+  deployments: StrategyDeploymentRow[];
 }): string {
   return [
     `[RESIDENT_AGENT_RUN trigger=${opts.trigger}]`,
@@ -94,14 +148,17 @@ function buildRunPrompt(opts: {
     "## Long-Term Mandate",
     opts.agent.mandate || "Follow assigned mandates and report clearly.",
     "",
-    "## Assigned Strategy Mandates",
+    "## Strategy Package Context",
+    formatStrategyPackages(opts.packages),
+    "",
+    "## Active Deployments",
+    formatDeployments(opts.deployments),
+    "",
+    "## Legacy Strategy Mandates",
     formatMandates(opts.mandates),
     "",
     "## Run Instructions",
-    "First inspect current portfolio, positions, and risk. Then inspect market data required by the assigned mandates.",
-    "For each assigned mandate, decide whether its setup is satisfied.",
-    "Only trade when the assigned mandate and risk policy both permit it.",
-    "End with a concise run report: observations, mandate decision, final action, risk state, and tool results.",
+    ...runInstructions(opts.agent),
   ].join("\n");
 }
 
@@ -122,12 +179,11 @@ export class ResidentAgentRuntime {
     if (resident.status !== "active") throw new Error(`Resident agent is not active: ${agentId}`);
 
     const mandates = this.loadAssignedMandates(resident);
-    if (resident.type === "trader" && mandates.length === 0) {
-      throw new Error(`Trader resident agent ${agentId} has no active assigned strategy mandate.`);
-    }
+    const packages = this.memory.listStrategyPackages();
+    const deployments = this.loadRelevantDeployments(resident);
 
     this.ensureSessionLoaded(resident);
-    const prompt = buildRunPrompt({ agent: resident, trigger, mandates });
+    const prompt = buildRunPrompt({ agent: resident, trigger, mandates, packages, deployments });
     const run = this.memory.createAgentRun({
       agentId,
       trigger,
@@ -167,6 +223,12 @@ export class ResidentAgentRuntime {
       result.push({ mandate, assignment });
     }
     return result;
+  }
+
+  private loadRelevantDeployments(agent: ResidentAgentRow): StrategyDeploymentRow[] {
+    return this.memory
+      .listStrategyDeployments()
+      .filter((deployment) => deployment.residentTraderId === agent.id || deployment.botId === agent.botId);
   }
 
   private ensureSessionLoaded(agent: ResidentAgentRow): void {

@@ -15,7 +15,8 @@ export type ToolDep =
   | "broker"
   | "agent"
   | "skill_loader"
-  | "strategy_store";
+  | "strategy_store"
+  | "strategy_deployment_service";
 
 export type ToolHandler = (args: Record<string, any>) => Promise<string>;
 
