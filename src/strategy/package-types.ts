@@ -14,6 +14,7 @@ export interface SignalExecutableSpec {
   entry: Condition[];
   exit: Condition[];
   positionSizeUsdt: number;
+  leverage?: number;
   stopLossPct: number;
   takeProfitPct: number;
 }

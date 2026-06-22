@@ -69,6 +69,11 @@ function compileSignal(input: CompileStrategyPackageInput, spec: SignalExecutabl
   requireArray(spec.entry, "signal entry");
   requireArray(spec.exit, "signal exit");
   const positionSizeUsdt = requirePositive(spec.positionSizeUsdt, "signal positionSizeUsdt");
+  const leverage = spec.leverage === undefined ? undefined : requirePositive(spec.leverage, "signal leverage");
+  const maxLeverage = Number(input.package.riskPolicy.maxLeverage ?? 0);
+  if (leverage !== undefined && maxLeverage > 0 && leverage > maxLeverage) {
+    throw new Error(`signal leverage ${leverage} exceeds risk_policy.maxLeverage ${maxLeverage}`);
+  }
   const stopLossPct = requirePositive(spec.stopLossPct, "signal stopLossPct");
   const takeProfitPct = requirePositive(spec.takeProfitPct, "signal takeProfitPct");
   const totalAllocation = input.allocatedUsdt ?? Number(input.package.riskPolicy.maxTotalNotionalUsdt ?? 0);
@@ -87,6 +92,7 @@ function compileSignal(input: CompileStrategyPackageInput, spec: SignalExecutabl
       entry: spec.entry,
       exit: spec.exit,
       positionSizeUsdt,
+      ...(leverage !== undefined ? { leverage } : {}),
       stopLossPct,
       takeProfitPct,
     },

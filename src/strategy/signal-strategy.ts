@@ -26,6 +26,7 @@ export interface SignalStrategyParams {
   entry: Condition[];
   exit: Condition[];
   positionSizeUsdt: number;
+  leverage?: number;
   stopLossPct: number;
   takeProfitPct: number;
 }
@@ -57,6 +58,10 @@ export class SignalStrategy extends Strategy {
 
   get positionSizeUsdt(): number {
     return (this.params as SignalStrategyParams).positionSizeUsdt;
+  }
+
+  get leverage(): number | undefined {
+    return (this.params as SignalStrategyParams).leverage;
   }
 
   get stopLossPct(): number {
@@ -130,6 +135,7 @@ export class SignalStrategy extends Strategy {
         sizeUsdt: p.positionSizeUsdt,
         reason: `Entry conditions met for strategy ${this.id.slice(0, 8)} on ${p.timeframe}`,
         timestamp: Date.now(),
+        leverage: p.leverage,
         stopLossPct: p.stopLossPct,
         takeProfitPct: p.takeProfitPct,
       } satisfies Signal);

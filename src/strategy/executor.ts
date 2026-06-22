@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { BaseExchange, ExchangeMarginMode, ExchangeOrderOptions, ExchangePositionMode, ExchangePositionSide } from "../exchange/base.js";
 import type { Broker, BrokerOrderResult } from "../broker/types.js";
+import type { MarketType } from "../broker/symbols.js";
 import type { MarketFeed, Tick } from "../market-feed.js";
 import type { MarketDataProvider } from "../market-data/types.js";
 import type { Memory } from "../memory.js";
@@ -101,15 +102,21 @@ export class OrderExecutor extends EventEmitter {
       if (!this.botId || !this.tradingAccountId) {
         return { error: "Broker execution requires botId and tradingAccountId" };
       }
+      const marketType: MarketType = symbol.includes(":") ? "swap" : "spot";
+      const capitalAllocationId = this.capitalAllocationId();
       return this.broker.createOrder({
         symbol,
-        marketType: "spot",
+        marketType,
         side,
+        positionSide: marketType === "swap" ? signal.side : undefined,
         orderType,
         amount,
         price: orderType === "limit" ? price ?? null : null,
+        leverage: marketType === "swap" && signal.action === "enter" ? signal.leverage ?? 1 : undefined,
+        reduceOnly: marketType === "swap" && signal.action === "exit",
         actorType: "strategy",
         actorId: signal.ruleId,
+        capitalAllocationId,
         botId: this.botId,
         tradingAccountId: this.tradingAccountId,
       });
@@ -305,6 +312,8 @@ export class OrderExecutor extends EventEmitter {
       const positionId = signal.positionId ?? signal.ruleId;
       this.memory?.createPendingOrder({
         strategyId: signal.ruleId,
+        botId: this.botId,
+        tradingAccountId: this.tradingAccountId,
         positionId,
         action: "enter",
         symbol: signal.symbol,
@@ -345,6 +354,8 @@ export class OrderExecutor extends EventEmitter {
       }
       this.memory?.createPendingOrder({
         strategyId: signal.ruleId,
+        botId: this.botId,
+        tradingAccountId: this.tradingAccountId,
         positionId,
         action: "exit",
         symbol: pos.symbol,
@@ -439,6 +450,8 @@ export class OrderExecutor extends EventEmitter {
     this.memory?.saveActivePosition({
       ruleId: positionId,
       strategyId: signal.ruleId,
+      botId: this.botId,
+      tradingAccountId: this.tradingAccountId,
       symbol: pos.symbol,
       side: pos.side,
       entryPrice: pos.entryPrice,
@@ -506,16 +519,27 @@ export class OrderExecutor extends EventEmitter {
   }
 
   private logTrade(signal: Signal, price: number, amount: number, action: string): void {
+    const orderSide = signal.action === "enter"
+      ? signal.side === "long" ? "buy" : "sell"
+      : signal.side === "long" ? "sell" : "buy";
     this.memory?.logTrade("system", {
       symbol: signal.symbol,
-      side: signal.side === "long" ? "buy" : "sell",
+      side: orderSide,
       amount,
       price,
       order_type: "market",
       mode: this.paperMode ? "PAPER" : "LIVE",
       reasoning: `[Auto] ${action}: ${signal.reason}`,
       strategyId: signal.ruleId,
+      botId: this.botId,
+      tradingAccountId: this.tradingAccountId,
+      capitalAllocationId: this.capitalAllocationId(),
     });
+  }
+
+  private capitalAllocationId(): string | null {
+    if (!this.memory || !this.botId || !this.tradingAccountId) return null;
+    return this.memory.getBotAllocation(this.botId, this.tradingAccountId, "USDT")?.id ?? null;
   }
 
   private logEvent(type: string, data: string): void {
