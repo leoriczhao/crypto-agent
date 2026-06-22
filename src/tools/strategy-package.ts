@@ -15,6 +15,10 @@ function obj(value: unknown): Record<string, any> {
   return {};
 }
 
+function hasValue(value: unknown): boolean {
+  return value !== undefined && value !== null;
+}
+
 function status(value: unknown, fallback: StrategyPackageStatus): StrategyPackageStatus {
   const s = String(value || "");
   return PACKAGE_STATUSES.has(s as StrategyPackageStatus) ? s as StrategyPackageStatus : fallback;
@@ -31,7 +35,7 @@ registerTool(
   {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["create", "list", "show", "submit", "reject", "deprecate"], default: "list" },
+      action: { type: "string", enum: ["create", "revise", "list", "show", "submit", "reject", "deprecate"], default: "list" },
       id: { type: "string" },
       version: { type: "integer", default: 1 },
       family_id: { type: "string" },
@@ -96,6 +100,38 @@ registerTool(
         const pkg = memory.getStrategyPackage(String(id), Number(version) || 1);
         if (!pkg) return `Error: strategy package not found: ${id}@${version}`;
         return JSON.stringify(pkg, null, 2);
+      }
+
+      if (action === "revise") {
+        const packageId = String(id || "").trim();
+        const baseVersion = Number(version) || 1;
+        if (!packageId) return "Error: id is required";
+        const base = memory.getStrategyPackage(packageId, baseVersion);
+        if (!base) return `Error: strategy package not found: ${packageId}@${baseVersion}`;
+        const nextVersion = memory.nextStrategyPackageVersion(base.familyId);
+        const revised = memory.createStrategyPackage({
+          id: base.id,
+          version: nextVersion,
+          familyId: base.familyId,
+          name: String(name || "").trim() || `${base.name} v${nextVersion}`,
+          status: "draft",
+          source: String(source || base.source || "agent"),
+          mandate: hasValue(mandate) ? obj(mandate) : base.mandate,
+          executableSpec: hasValue(executable_spec) ? obj(executable_spec) : base.executableSpec,
+          riskPolicy: hasValue(risk_policy) ? obj(risk_policy) : base.riskPolicy,
+          validationStatus: "not_run",
+          validationSummary: null,
+          authorRunId: null,
+          authorAgentId: null,
+        });
+        return [
+          `Strategy package revised: ${revised.name} (${revised.id}@${revised.version})`,
+          `from=${base.id}@${base.version}`,
+          `status=${revised.status}`,
+          `validation=${revised.validationStatus}`,
+          `source=${revised.source}`,
+          `created_by_session=${sessionId ?? "none"}`,
+        ].join("\n");
       }
 
       if (action === "submit" || action === "reject" || action === "deprecate") {

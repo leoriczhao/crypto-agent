@@ -203,4 +203,32 @@ describe("ResidentAgentRuntime", () => {
     expect(prompt).toContain("btc_signal@1");
     expect(prompt).toContain("health: positions=1 open_orders=0 pending_orders=0 fills=0 margin=250 unrealized_pnl=5 realized_pnl=0");
   });
+
+  test("resident researcher prompt enforces KB-first package workflow", async () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const resident = memory.createResidentAgent({
+      id: "resident-researcher",
+      type: "researcher",
+      name: "Package Researcher",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      mandate: "Research BTC/ETH strategy ideas.",
+      toolPolicy: "researcher.v2",
+      riskPolicy: {},
+    });
+    const agent = {
+      sessions: new SessionManager(),
+      chatInSession: vi.fn().mockResolvedValue("research report: pending_review."),
+    } as any;
+    const runtime = new ResidentAgentRuntime({ memory, agent });
+
+    await runtime.runAgent(resident.id, "manual");
+
+    const prompt = vi.mocked(agent.chatInSession).mock.calls[0][1];
+    expect(prompt).toContain("Search strategy KB with kb_search before proposing new work.");
+    expect(prompt).toContain("Log every outcome with kb_log.");
+    expect(prompt).toContain("Adopted hypotheses become strategy_package.create or strategy_package.revise.");
+    expect(prompt).toContain("Do not allocate capital.");
+    expect(prompt).toContain("Do not call deploy_strategy.");
+  });
 });

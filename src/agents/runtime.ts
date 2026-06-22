@@ -51,8 +51,13 @@ function roleContract(agent: ResidentAgentRow): string {
     return [
       "You are a Resident Research Agent.",
       "Research assigned markets and produce concise findings for future trader runs.",
-      "You do not place orders.",
-      "If you propose a strategy, create a strategy package draft or submitted package requiring validation.",
+      "Search strategy KB with kb_search before proposing new work.",
+      "Log every outcome with kb_log.",
+      "Adopted hypotheses become strategy_package.create or strategy_package.revise.",
+      "Rejected hypotheses must include a concrete failure reason.",
+      "Do not allocate capital.",
+      "Do not call deploy_strategy.",
+      "Do not place orders.",
     ].join("\n");
   }
   return [
@@ -120,9 +125,12 @@ function runInstructions(agent: ResidentAgentRow): string[] {
   }
   if (agent.type === "researcher") {
     return [
-      "Inspect market context, prior package outcomes, and research KB before proposing changes.",
-      "Create strategy packages for reusable strategy logic; do not place orders.",
-      "End with concise findings, rejected hypotheses, package changes, and validation needs.",
+      "Start by searching prior outcomes with kb_search for the hypothesis, symbol, and failure patterns.",
+      "If adopted, create a new package with strategy_package.create or an immutable revision with strategy_package.revise.",
+      "If rejected, call kb_log with outcome='rejected' and a specific failure_reason.",
+      "If uncertain, call kb_log with outcome='pending_review' and explain the blocker.",
+      "Do not allocate capital, do not call deploy_strategy, and do not place orders.",
+      "End with concise findings, rejected hypotheses, package changes, validation needs, and KB entry ids.",
     ];
   }
   return [

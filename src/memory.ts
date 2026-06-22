@@ -1944,6 +1944,13 @@ export class Memory {
     return rows.map((r) => this.rowToStrategyPackage(r));
   }
 
+  nextStrategyPackageVersion(familyId: string): number {
+    const row = this.db
+      .prepare("SELECT COALESCE(MAX(version), 0) AS max_version FROM strategy_packages WHERE family_id = ?")
+      .get(familyId) as { max_version: number } | undefined;
+    return Number(row?.max_version ?? 0) + 1;
+  }
+
   setStrategyPackageStatus(id: string, version: number, status: StrategyPackageStatus): void {
     this.db
       .prepare("UPDATE strategy_packages SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND version = ?")

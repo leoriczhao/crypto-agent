@@ -307,6 +307,81 @@ describe("strategy package tools", () => {
     expect(stopped).not.toContain("stopd");
   });
 
+  test("revises a strategy package into the next immutable version", async () => {
+    await import("../src/tools/index.js");
+    const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
+    memory.createStrategyPackage({
+      id: "btc_signal",
+      version: 1,
+      familyId: "btc_signal",
+      name: "BTC Signal",
+      status: "paper_ready",
+      source: "researcher",
+      mandate: { thesis: "Use RSI pullbacks." },
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "1h",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 35 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 55 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 3,
+        takeProfitPct: 5,
+      },
+      riskPolicy: { maxLeverage: 3, maxSingleNotionalUsdt: 50, maxTotalNotionalUsdt: 150 },
+      validationStatus: "waived",
+      validationSummary: "Paper waiver.",
+    });
+
+    const revised = await TOOL_HANDLERS.strategy_package({
+      memory,
+      action: "revise",
+      id: "btc_signal",
+      version: 1,
+      name: "BTC Signal v2",
+      source: "resident-researcher",
+      mandate: { thesis: "Use stricter RSI pullbacks." },
+      executable_spec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "1h",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 30 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 40,
+        stopLossPct: 2,
+        takeProfitPct: 4,
+      },
+      risk_policy: { maxLeverage: 2, maxSingleNotionalUsdt: 40, maxTotalNotionalUsdt: 120 },
+    });
+
+    expect(revised).toContain("btc_signal@2");
+    expect(memory.getStrategyPackage("btc_signal", 1)).toMatchObject({
+      id: "btc_signal",
+      version: 1,
+      familyId: "btc_signal",
+      name: "BTC Signal",
+      status: "paper_ready",
+      validationStatus: "waived",
+      executableSpec: { entry: [{ indicator: "rsi", operator: "lt", value: 35 }] },
+      riskPolicy: { maxLeverage: 3 },
+    });
+    expect(memory.getStrategyPackage("btc_signal", 2)).toMatchObject({
+      id: "btc_signal",
+      version: 2,
+      familyId: "btc_signal",
+      name: "BTC Signal v2",
+      status: "draft",
+      source: "resident-researcher",
+      validationStatus: "not_run",
+      validationSummary: null,
+      mandate: { thesis: "Use stricter RSI pullbacks." },
+      executableSpec: { entry: [{ indicator: "rsi", operator: "lt", value: 30 }], positionSizeUsdt: 40 },
+      riskPolicy: { maxLeverage: 2, maxTotalNotionalUsdt: 120 },
+    });
+  });
+
   test("runs signal validation backtest and marks package paper ready", async () => {
     await import("../src/tools/index.js");
     const { TOOL_HANDLERS } = await import("../src/tools/registry.js");
