@@ -2218,6 +2218,21 @@ export class Memory {
     return (rows as any[]).map((r) => this.rowToStrategyInstance(r));
   }
 
+  loadStrategyInstanceSnapshots(): StrategySnapshot[] {
+    return this.listStrategyInstances().map((instance) => ({
+      id: instance.id,
+      kind: instance.kind,
+      symbol: instance.symbol,
+      params: instance.params,
+      enabled: instance.enabled,
+      allocatedUsdt: instance.allocatedUsdt,
+      botId: instance.botId,
+      tradingAccountId: instance.tradingAccountId,
+      createdAt: instance.createdAt,
+      updatedAt: instance.updatedAt,
+    }));
+  }
+
   updateStrategyInstance(id: string, patch: { enabled?: boolean; allocatedUsdt?: number; params?: Record<string, any> }): void {
     const fields: string[] = [];
     const values: any[] = [];

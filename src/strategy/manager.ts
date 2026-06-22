@@ -56,6 +56,7 @@ export interface StrategyPersistence {
   saveStrategy(snap: StrategySnapshot): void;
   deleteStrategy(id: string): void;
   loadAllStrategies(): StrategySnapshot[];
+  loadStrategyInstanceSnapshots?: () => StrategySnapshot[];
   saveRiskParams(params: RiskParams): void;
   loadRiskParams(): RiskParams | null;
 }
@@ -71,6 +72,10 @@ export interface StrategyBudget {
   usedUsdt: number;
   realizedPnl: number;
   openPositions: number;
+}
+
+interface StrategyMutationOptions {
+  persist?: boolean;
 }
 
 /**
@@ -120,7 +125,7 @@ export class StrategyManager extends EventEmitter {
     enabled?: boolean;
     botId?: string | null;
     tradingAccountId?: string | null;
-  }): Strategy {
+  }, opts: StrategyMutationOptions = {}): Strategy {
     const now = new Date().toISOString();
     const snap: StrategySnapshot = {
       id: input.id ?? randomUUID(),
@@ -136,7 +141,7 @@ export class StrategyManager extends EventEmitter {
     };
     const strat = instantiateStrategy(snap);
     this.strategies.set(strat.id, strat);
-    this.persistence?.saveStrategy(snap);
+    if (opts.persist !== false) this.persistence?.saveStrategy(snap);
     this.emit("strategyAdded", strat);
     return strat;
   }
@@ -159,6 +164,7 @@ export class StrategyManager extends EventEmitter {
   updateStrategy(
     id: string,
     patch: Partial<Pick<StrategySnapshot, "params" | "enabled" | "allocatedUsdt">>,
+    opts: StrategyMutationOptions = {},
   ): Strategy | null {
     const existing = this.strategies.get(id);
     if (!existing) return null;
@@ -175,7 +181,7 @@ export class StrategyManager extends EventEmitter {
     };
     const fresh = instantiateStrategy(snap);
     this.strategies.set(id, fresh);
-    this.persistence?.saveStrategy(snap);
+    if (opts.persist !== false) this.persistence?.saveStrategy(snap);
     return fresh;
   }
 
@@ -280,7 +286,9 @@ export class StrategyManager extends EventEmitter {
     if (!this.persistence) return;
     const rp = this.persistence.loadRiskParams();
     if (rp) this._riskParams = rp;
-    for (const snap of this.persistence.loadAllStrategies()) {
+    const instanceSnapshots = this.persistence.loadStrategyInstanceSnapshots?.();
+    const snapshots = instanceSnapshots?.length ? instanceSnapshots : this.persistence.loadAllStrategies();
+    for (const snap of snapshots) {
       try {
         const strat = instantiateStrategy(snap);
         this.strategies.set(snap.id, strat);

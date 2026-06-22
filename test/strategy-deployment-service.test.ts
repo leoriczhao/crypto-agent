@@ -95,6 +95,33 @@ describe("StrategyDeploymentService", () => {
     expect(runtime.startOne).toHaveBeenCalledTimes(2);
   });
 
+  test("deployment activation does not write legacy strategy rows", async () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const allocation = memory.ensureBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      amount: 300,
+    });
+    createSignalPackage(memory);
+    const service = new StrategyDeploymentService({ memory, manager, runtime });
+
+    await service.activate({
+      id: "dep-1",
+      packageId: "btc_eth_signal",
+      packageVersion: 1,
+      mode: "PAPER",
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      capitalAllocationId: allocation.id,
+      allocatedUsdt: 300,
+    });
+
+    expect(memory.loadAllStrategies()).toHaveLength(0);
+    expect(memory.listStrategyInstances("dep-1")).toHaveLength(2);
+    expect(manager.getStrategy("dep-1:btc-usdt-usdt")).toBeDefined();
+  });
+
   test("pauses and stops deployment strategies", async () => {
     const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
     const allocation = memory.ensureBotAllocation({

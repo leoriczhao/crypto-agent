@@ -100,7 +100,7 @@ export class StrategyDeploymentService {
     const instances = this.memory.listStrategyInstances(deployment.id);
     for (const instance of instances) {
       this.memory.updateStrategyInstance(instance.id, { enabled: true });
-      const strategy = this.manager.updateStrategy(instance.id, { enabled: true })
+      const strategy = this.manager.updateStrategy(instance.id, { enabled: true }, { persist: false })
         ?? this.materializeInstance({ ...instance, enabled: true });
       this.runtime?.startOne(strategy);
     }
@@ -129,7 +129,7 @@ export class StrategyDeploymentService {
     const instances = this.memory.listStrategyInstances(deployment.id);
     for (const instance of instances) {
       this.memory.updateStrategyInstance(instance.id, { enabled });
-      const strategy = this.manager.updateStrategy(instance.id, { enabled });
+      const strategy = this.manager.updateStrategy(instance.id, { enabled }, { persist: false });
       if (!enabled) await this.runtime?.stopOne(instance.id);
       else if (strategy) this.runtime?.startOne(strategy);
     }
@@ -158,6 +158,6 @@ export class StrategyDeploymentService {
       enabled: instance.enabled,
       botId: instance.botId,
       tradingAccountId: instance.tradingAccountId,
-    });
+    }, { persist: false });
   }
 }

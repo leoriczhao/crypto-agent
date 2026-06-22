@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Memory } from "../src/memory.js";
+import { StrategyManager } from "../src/strategy/manager.js";
 
 describe("strategy package persistence", () => {
   let dbPath: string;
@@ -221,6 +222,101 @@ describe("strategy package persistence", () => {
     expect(memory.getStrategyDeployment("dep-1")).toMatchObject({ status: "active" });
     expect(memory.listStrategyDeployments({ status: "active" })).toHaveLength(1);
     expect(memory.listStrategyInstances("dep-1")[0]).toMatchObject({ enabled: false });
+  });
+
+  test("strategy manager loads package deployment instances as runtime strategies", () => {
+    const identity = memory.ensureDefaultIdentity({ exchangeId: "okx", mode: "PAPER", name: "default" });
+    const allocation = memory.ensureBotAllocation({
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+      asset: "USDT",
+      amount: 300,
+    });
+    memory.createStrategyPackage({
+      id: "btc_signal",
+      version: 1,
+      familyId: "btc_signal",
+      name: "BTC Signal",
+      status: "paper_ready",
+      source: "researcher",
+      mandate: { thesis: "Simple signal strategy." },
+      executableSpec: {
+        kind: "signal",
+        symbols: ["BTC/USDT:USDT"],
+        timeframe: "15m",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 35 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 1.5,
+        takeProfitPct: 3,
+      },
+      riskPolicy: { maxLeverage: 1, maxSingleNotionalUsdt: 50, maxTotalNotionalUsdt: 100 },
+      validationStatus: "waived",
+    });
+    memory.createStrategyDeployment({
+      id: "dep-1",
+      packageId: "btc_signal",
+      packageVersion: 1,
+      status: "active",
+      mode: "PAPER",
+      tradingAccountId: identity.tradingAccount.id,
+      botId: identity.bot.id,
+      capitalAllocationId: allocation.id,
+      runtimePolicy: {},
+    });
+    memory.createStrategyInstance({
+      id: "dep-1:btc-signal",
+      deploymentId: "dep-1",
+      packageId: "btc_signal",
+      packageVersion: 1,
+      kind: "signal",
+      symbol: "BTC/USDT:USDT",
+      params: {
+        timeframe: "15m",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 35 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 1.5,
+        takeProfitPct: 3,
+      },
+      allocatedUsdt: 100,
+      botId: identity.bot.id,
+      tradingAccountId: identity.tradingAccount.id,
+    });
+
+    const manager = new StrategyManager(memory);
+
+    expect(manager.getStrategy("dep-1:btc-signal")).toBeDefined();
+    expect(manager.getStrategy("dep-1:btc-signal")?.symbol).toBe("BTC/USDT:USDT");
+    expect(manager.getActiveStrategies()).toHaveLength(1);
+  });
+
+  test("strategy manager falls back to legacy strategies when no deployment instances exist", () => {
+    memory.saveStrategy({
+      id: "manual-debug-strategy",
+      kind: "signal",
+      symbol: "BTC/USDT:USDT",
+      params: {
+        timeframe: "15m",
+        side: "long",
+        entry: [{ indicator: "rsi", operator: "lt", value: 35 }],
+        exit: [{ indicator: "rsi", operator: "gt", value: 60 }],
+        positionSizeUsdt: 50,
+        stopLossPct: 1.5,
+        takeProfitPct: 3,
+      },
+      enabled: true,
+      allocatedUsdt: 100,
+      createdAt: "2026-06-22T00:00:00.000Z",
+      updatedAt: "2026-06-22T00:00:00.000Z",
+    });
+
+    const manager = new StrategyManager(memory);
+
+    expect(manager.getStrategy("manual-debug-strategy")).toBeDefined();
+    expect(manager.getActiveStrategies()).toHaveLength(1);
   });
 
   test("strategy package schema remains clean-schema only", () => {
