@@ -1,95 +1,86 @@
 # Crypto Agent
 
-LLM-driven crypto trading agent with real exchange integration.
+Python-only crypto trading agent runtime with paper trading, OKX live-exchange
+adapter contracts, deterministic risk gates, SQLite persistence, LangGraph
+agent flows, and Docker deployment.
 
+The old TypeScript agent/runtime/UI stack has been removed. There is no npm
+workflow in the active repository.
+
+## Runtime Shape
+
+```text
+Python daemon
+  -> Python LangGraph graphs
+  -> Python tool registry
+  -> Python trading services
+  -> SQLite persistence
+  -> Docker deployment
 ```
-Agent = LLM (OpenAI / Anthropic)
-      + 17 atomic tools (market, trade, analysis, research, control)
-      + Exchange abstraction (ccxt → OKX, Gate.io, Binance, ...)
-      + Skills (on-demand domain knowledge)
-      + Context compression (infinite sessions)
-      + Sub-agents (researcher / trader / risk_officer)
-      + Soul (conservative / balanced / aggressive personality)
-      + Heartbeat + Cron + Memory + Telegram notifications
-```
+
+Core directories:
+
+- `crypto_agent/` - production Python package.
+- `tests_py/` - Python test suite.
+- `agents/residents/` - durable resident-agent profile files.
+- `docs/` - current architecture, persistence, deployment, and migration docs.
 
 ## Quick Start
 
 ```bash
-git clone <this-repo>
-cd crypto-agent
-cp .env.example .env   # Edit: add your LLM API key + exchange credentials
-npm install
-npm run dev            # Interactive CLI
-npm run dev:daemon     # Background daemon with heartbeat
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev,agent]"
+
+crypto-agent-py init-db --database-path data/crypto_agent.db --destructive
+crypto-agent-py health --database-path data/crypto_agent.db
+crypto-agent-py smoke \
+  --database-path data/smoke.db \
+  --profile-path agents/residents/btc-eth-researcher/AGENT.md \
+  --destructive
 ```
 
-## Architecture
-
-```
-User ─→ CLI (readline) ─→ Agent Loop ─→ LLM (GPT/Claude)
-                               │              │
-                               │        tool_use decision
-                               │              │
-                               ▼              ▼
-                         Tool Dispatch ←── 17 tools
-                               │
-                         Exchange Layer (ccxt)
-                               │
-                         OKX / Gate.io / Binance ...
-```
-
-The LLM decides **what** to do. Tools execute **how**. The exchange layer handles **where**.
-
-## Tools (17)
-
-| Category | Tools | Purpose |
-|----------|-------|---------|
-| Market | `get_price`, `get_klines` | Price, OHLCV candles |
-| Trade | `buy`, `sell`, `cancel_order` | Order execution |
-| Portfolio | `get_portfolio` | Balances + positions + PnL |
-| Analysis | `analyze`, `assess_risk`, `backtest` | TA indicators, risk, backtesting |
-| Research | `get_news`, `get_chain_stats` | News sentiment, on-chain data |
-| Control | `delegate`, `switch_exchange`, `switch_soul`, `schedule` | Sub-agents, config |
-| Knowledge | `load_skill`, `compact` | Domain expertise, context management |
-
-## Configuration (.env)
+## Daemon And Client
 
 ```bash
-# LLM
-LLM_PROVIDER=openai          # openai or anthropic
-API_KEY=your-key
-API_BASE_URL=                 # Optional proxy
-MODEL_ID=gpt-5.4
-LLM_CONTEXT_WINDOW=500000     # auto-compact threshold
+crypto-agent-py daemon \
+  --database-path data/crypto_agent.db \
+  --socket-path /tmp/crypto-agent-py.sock \
+  --environment development \
+  --init-db
 
-# Exchange
-DEFAULT_EXCHANGE=okx
-EXCHANGE_API_KEY=...
-EXCHANGE_SECRET=...
-EXCHANGE_PASSWORD=...         # Required for OKX
-PAPER_TRADING=true            # false for real trading
-
-# Trading
-MAX_ORDER_SIZE_USDT=1000
-TRADING_SOUL=balanced         # conservative, balanced, aggressive
-
-# Daemon
-HEARTBEAT_INTERVAL=60
-TELEGRAM_BOT_TOKEN=           # Optional
-TELEGRAM_CHAT_ID=
+crypto-agent-py-client --socket-path /tmp/crypto-agent-py.sock health
+crypto-agent-py-client --socket-path /tmp/crypto-agent-py.sock smoke \
+  --profile-path agents/residents/btc-eth-researcher/AGENT.md
 ```
 
-## Scripts
+## Docker
 
 ```bash
-npm run dev          # Start interactive CLI (tsx)
-npm run dev:daemon   # Start daemon with heartbeat (tsx)
-npm run build        # Compile TypeScript to dist/
-npm test             # Run tests (vitest, 79 tests)
-npm run test:watch   # Watch mode
+mkdir -p data runtime
+printf "CRYPTO_AGENT_UID=%s\nCRYPTO_AGENT_GID=%s\n" "$(id -u)" "$(id -g)" > .env
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=80 crypto-agent
 ```
 
-## License
+The container runs `crypto-agent-py daemon` and exposes a Unix socket at
+`./runtime/crypto-agent.sock`.
 
-MIT
+## Tests
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests_py -q
+```
+
+## Current Scope
+
+- PaperBroker persists local orders, fills, positions, trades, and PnL.
+- RiskGate blocks orders that violate allocation, leverage, exposure, or
+  drawdown constraints.
+- StrategyValidationService creates, backtests, validates, and deploys signal
+  strategy packages.
+- ResidentRuntime persists researcher/trader residents and audited runs.
+- IPC server/client expose `health` and `smoke` commands over JSONL Unix socket.
+- LiveExchange wraps OKX swap market order parameters, but live order flow still
+  requires a separate readiness pass before real trading is enabled.

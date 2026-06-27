@@ -3,1077 +3,272 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Crypto Agent 项目全景说明</title>
+  <title>Crypto Agent Python 架构</title>
   <style>
     :root {
-      --bg: #f5f7f8;
-      --panel: #ffffff;
-      --panel-2: #f9fbfb;
-      --ink: #172126;
-      --muted: #60707a;
-      --line: #d7e0e4;
-      --teal: #0f766e;
-      --teal-soft: #dff3f1;
-      --blue: #2563eb;
-      --amber: #b45309;
-      --amber-soft: #fff3d8;
-      --red: #b42318;
-      --red-soft: #ffe8e3;
-      --green: #15803d;
-      --green-soft: #e5f6ea;
-      --purple: #6d28d9;
-      --slate: #334155;
-      --shadow: 0 18px 38px rgba(15, 23, 42, 0.08);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: light;
+      --bg: #fbfaf7;
+      --paper: #fffdfa;
+      --ink: #22211f;
+      --muted: #6f6a61;
+      --line: #ddd5ca;
+      --soft: #f3eee6;
+      --green: #e7f4ed;
+      --blue: #e9f1fb;
+      --red: #fff0ed;
+      --accent: #7c5c2e;
+      --code: #272822;
     }
-
     * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--ink);
-      font-family: var(--sans);
-      line-height: 1.58;
+      font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-
-    a { color: inherit; }
-    code, .mono {
-      font-family: var(--mono);
-      font-size: 0.94em;
+    main { max-width: 1180px; margin: 0 auto; padding: 56px 24px 96px; }
+    header { display: grid; gap: 18px; margin-bottom: 36px; }
+    h1, h2, h3 { line-height: 1.18; margin: 0; letter-spacing: 0; }
+    h1 { font-size: clamp(34px, 5vw, 64px); max-width: 880px; }
+    h2 { font-size: 28px; margin-top: 54px; }
+    h3 { font-size: 18px; }
+    p { margin: 0; color: var(--muted); }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--soft);
+      padding: 2px 5px;
+      border-radius: 5px;
+      color: #3f3323;
     }
-
-    .shell {
-      display: grid;
-      grid-template-columns: 250px minmax(0, 1fr);
-      max-width: 1480px;
-      margin: 0 auto;
-      min-height: 100vh;
-    }
-
-    .nav {
-      position: sticky;
-      top: 0;
-      height: 100vh;
-      padding: 28px 18px;
-      border-right: 1px solid var(--line);
-      background: rgba(245, 247, 248, 0.94);
-      backdrop-filter: blur(8px);
-      overflow: auto;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 780;
-      margin-bottom: 18px;
-    }
-
-    .mark {
-      width: 26px;
-      height: 26px;
-      border-radius: 7px;
-      background:
-        linear-gradient(135deg, var(--teal) 0 45%, var(--amber) 45% 68%, var(--blue) 68% 100%);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
-    }
-
-    .nav small {
-      display: block;
-      color: var(--muted);
-      margin-bottom: 18px;
-    }
-
-    .nav a {
-      display: block;
-      text-decoration: none;
-      color: #31424c;
-      padding: 8px 10px;
-      border-radius: 7px;
-      font-size: 14px;
-    }
-
-    .nav a:hover { background: var(--teal-soft); color: var(--teal); }
-
-    .content {
-      min-width: 0;
-      padding: 34px 34px 72px;
-    }
-
-    .hero {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-      padding: 30px;
-      overflow: hidden;
-    }
-
-    .eyebrow {
-      color: var(--teal);
-      font-weight: 760;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      font-size: 12px;
-      margin-bottom: 12px;
-    }
-
-    h1 {
+    pre {
       margin: 0;
-      font-size: clamp(40px, 6vw, 72px);
-      line-height: 0.98;
-      letter-spacing: 0;
-    }
-
-    .subtitle {
-      max-width: 940px;
-      margin: 18px 0 0;
-      color: #40515b;
-      font-size: 18px;
-    }
-
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-      gap: 22px;
-      margin-top: 26px;
-      align-items: stretch;
-    }
-
-    .status-strip {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .metric {
-      border: 1px solid var(--line);
+      padding: 18px;
       border-radius: 8px;
-      background: var(--panel-2);
-      padding: 14px;
-      min-height: 92px;
-    }
-
-    .metric b {
-      display: block;
-      font-size: 27px;
-      line-height: 1.05;
-      color: var(--ink);
-    }
-
-    .metric span {
-      display: block;
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .callout {
-      border: 1px solid #bddbd7;
-      border-left: 4px solid var(--teal);
-      background: #f3fbfa;
-      border-radius: 8px;
-      padding: 16px 18px;
-      color: #24444a;
-    }
-
-    .callout.warn {
-      border-color: #f4c56c;
-      border-left-color: var(--amber);
-      background: var(--amber-soft);
-      color: #4d3615;
-    }
-
-    .callout.danger {
-      border-color: #ffb8ad;
-      border-left-color: var(--red);
-      background: var(--red-soft);
-      color: #5f231c;
-    }
-
-    section {
-      margin-top: 30px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 26px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.045);
-    }
-
-    .section-head {
-      display: grid;
-      grid-template-columns: minmax(210px, 0.32fr) minmax(0, 0.68fr);
-      gap: 22px;
-      margin-bottom: 20px;
-      align-items: start;
-    }
-
-    h2 {
-      margin: 0;
-      font-size: 30px;
-      line-height: 1.08;
-      letter-spacing: 0;
-    }
-
-    h3 {
-      margin: 0 0 10px;
-      font-size: 18px;
-      line-height: 1.2;
-    }
-
-    h4 {
-      margin: 0 0 8px;
-      font-size: 15px;
-      color: var(--slate);
-    }
-
-    .lead {
-      margin: 0;
-      color: #455862;
-      font-size: 16px;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-    }
-
-    .grid.two {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .grid.four {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-
-    .card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-2);
-      padding: 16px;
-      min-width: 0;
-    }
-
-    .card p {
-      margin: 0;
-      color: #50626c;
-      font-size: 14px;
-    }
-
-    .tag-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      min-height: 24px;
-      padding: 3px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      color: #3d4f58;
-      background: #fff;
-      font-size: 12px;
-      white-space: nowrap;
-    }
-
-    .tag.good { border-color: #b7dfc3; background: var(--green-soft); color: var(--green); }
-    .tag.warn { border-color: #efc36a; background: var(--amber-soft); color: var(--amber); }
-    .tag.hot { border-color: #ffb8ad; background: var(--red-soft); color: var(--red); }
-    .tag.info { border-color: #bfd5ff; background: #eef5ff; color: var(--blue); }
-
-    .diagram {
-      width: 100%;
+      background: var(--code);
+      color: #f8f8f2;
       overflow-x: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fbfcfd;
-      padding: 14px;
-    }
-
-    svg text {
-      font-family: var(--sans);
-      fill: #1f2f38;
-    }
-
-    .node { fill: #fff; stroke: #b8c8d0; stroke-width: 1.2; }
-    .node.teal { fill: #e4f5f3; stroke: #6bb8b0; }
-    .node.blue { fill: #eef5ff; stroke: #94b8ff; }
-    .node.amber { fill: #fff3d8; stroke: #e0ac48; }
-    .node.green { fill: #e8f7ed; stroke: #82c795; }
-    .node.red { fill: #ffe8e3; stroke: #f09a8b; }
-    .arrow { stroke: #647987; stroke-width: 1.5; marker-end: url(#arrow); fill: none; }
-    .dash { stroke-dasharray: 5 5; }
-
-    .timeline {
-      counter-reset: step;
-      display: grid;
-      gap: 10px;
-    }
-
-    .step {
-      display: grid;
-      grid-template-columns: 38px minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
-    }
-
-    .step::before {
-      counter-increment: step;
-      content: counter(step);
-      display: grid;
-      place-items: center;
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: var(--teal);
-      color: white;
-      font-weight: 760;
-      font-size: 13px;
-    }
-
-    .step-body {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px 14px;
-      background: var(--panel-2);
-    }
-
-    .step-body p { margin: 0; color: #50626c; font-size: 14px; }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
       font-size: 14px;
-      overflow-wrap: anywhere;
-    }
-
-    th, td {
-      text-align: left;
-      vertical-align: top;
-      border-bottom: 1px solid var(--line);
-      padding: 10px 8px;
-    }
-
-    th {
-      color: #40515b;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      background: #f6f9fa;
-    }
-
-    tr:last-child td { border-bottom: 0; }
-
-    .table-wrap {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: auto;
-      background: #fff;
-    }
-
-    .code {
-      border: 1px solid #cdd8dd;
-      border-radius: 8px;
-      background: #101820;
-      color: #e7f0f4;
-      padding: 14px;
-      overflow: auto;
-      font-family: var(--mono);
-      font-size: 13px;
       line-height: 1.55;
     }
-
-    .code .muted { color: #9fb0bb; }
-    .code .accent { color: #7dd3fc; }
-    .code .good { color: #86efac; }
-    .code .warn { color: #fde68a; }
-
-    .pill-list {
+    pre code { background: transparent; color: inherit; padding: 0; }
+    .lede { font-size: 20px; max-width: 820px; }
+    .tagline { color: var(--accent); font-weight: 700; }
+    .grid { display: grid; gap: 16px; }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 100%;
+    }
+    .card h3 { margin-bottom: 8px; }
+    .strip {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin: 0;
-      padding: 0;
-      list-style: none;
+      margin-top: 18px;
     }
-
-    .pill-list li {
+    .pill {
       border: 1px solid var(--line);
+      background: var(--paper);
       border-radius: 999px;
       padding: 6px 10px;
-      background: #fff;
-      color: #40515b;
-      font-size: 13px;
+      color: var(--muted);
+      font-size: 14px;
     }
-
-    .split {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 16px;
-    }
-
-    .source-filter {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-
-    input[type="search"] {
-      flex: 1;
-      min-width: 260px;
+    .diagram {
+      background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 10px 12px;
-      font: inherit;
-      background: #fff;
+      padding: 18px;
+      overflow-x: auto;
     }
-
-    button {
-      border: 1px solid #b8c8d0;
-      border-radius: 8px;
-      padding: 10px 12px;
-      background: #fff;
-      color: #20313a;
-      font: inherit;
-      cursor: pointer;
+    svg { width: 100%; min-width: 860px; height: auto; }
+    .node { fill: #fffdfa; stroke: #d7ccbd; stroke-width: 1.4; }
+    .node-soft { fill: #f8f0e4; stroke: #d7ccbd; stroke-width: 1.4; }
+    .node-green { fill: #e7f4ed; stroke: #b8d8c5; stroke-width: 1.4; }
+    .node-blue { fill: #e9f1fb; stroke: #bfd3e6; stroke-width: 1.4; }
+    .node-red { fill: #fff0ed; stroke: #ecc6c0; stroke-width: 1.4; }
+    .label { font-size: 15px; fill: #2d2a25; font-weight: 700; }
+    .small { font-size: 12px; fill: #6f6a61; }
+    .arrow { stroke: #8e7d66; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    table { width: 100%; border-collapse: collapse; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { background: var(--soft); color: #3c352c; }
+    tr:last-child td { border-bottom: 0; }
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--paper);
+      padding: 16px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 22px 0;
     }
-
-    button:hover { border-color: var(--teal); color: var(--teal); }
-
-    .copy-feedback {
-      color: var(--green);
-      font-size: 13px;
-      margin-left: 8px;
-    }
-
-    .footer {
-      margin-top: 32px;
-      color: var(--muted);
-      font-size: 13px;
-      border-top: 1px solid var(--line);
-      padding-top: 18px;
-    }
-
-    @media (max-width: 980px) {
-      .shell { grid-template-columns: 1fr; }
-      .nav {
-        position: relative;
-        height: auto;
-        border-right: 0;
-        border-bottom: 1px solid var(--line);
-      }
-      .nav a { display: inline-block; }
-      .content { padding: 22px 16px 48px; }
-      .hero-grid, .section-head, .split { grid-template-columns: 1fr; }
-      .status-strip, .grid, .grid.two, .grid.four { grid-template-columns: 1fr; }
+    @media (max-width: 800px) {
+      main { padding: 34px 16px 72px; }
+      .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <nav class="nav" aria-label="页面导航">
-      <div class="brand"><span class="mark"></span><span>Crypto Agent</span></div>
-      <small>项目全景说明 / 2026-06-21 / local checkout</small>
-      <a href="#overview">01 总览</a>
-      <a href="#map">02 架构图</a>
-      <a href="#identity">03 账户与 agent 映射</a>
-      <a href="#runtime">04 主 Agent 运行流</a>
-      <a href="#resident">05 Resident Agent</a>
-      <a href="#trading">06 交易层</a>
-      <a href="#fastpath">07 策略快路径</a>
-      <a href="#persistence">08 SQLite 持久化</a>
-      <a href="#risk">09 风险与恢复</a>
-      <a href="#tools">10 工具与命令</a>
-      <a href="#config">11 配置与部署</a>
-      <a href="#testing">12 测试与状态</a>
-      <a href="#roadmap">13 后续边界</a>
-      <a href="#source">14 来源索引</a>
-    </nav>
+  <main>
+    <header>
+      <p class="tagline">Crypto Agent · Python-only core</p>
+      <h1>一个由 Python LangGraph 编排的研究与交易系统</h1>
+      <p class="lede">
+        当前主线已经移除旧 TypeScript agent、Ink UI、npm 包、Vitest 测试和 Node systemd。
+        生产入口只剩 Python daemon、Python 工具层、Python 交易层、SQLite 和 Docker。
+      </p>
+      <div class="strip">
+        <span class="pill">Python 3.12</span>
+        <span class="pill">LangGraph</span>
+        <span class="pill">SQLite</span>
+        <span class="pill">PaperBroker</span>
+        <span class="pill">RiskGate</span>
+        <span class="pill">Docker</span>
+      </div>
+    </header>
 
-    <main class="content">
-      <article class="hero" id="overview">
-        <div class="eyebrow">Explain + Share artifact</div>
-        <h1>Crypto Agent 项目全景说明</h1>
-        <p class="subtitle">
-          这个项目现在不是一个简单聊天机器人，而是一个长驻 daemon：它同时持有 LLM agent、LangGraph 工具循环、会话、
-          paper/live 交易执行、策略快路径、Resident Agent 调度、SQLite 审计和恢复状态。CLI 只是一个连到 daemon 的薄客户端。
+    <section>
+      <h2>系统边界</h2>
+      <div class="grid cols-3">
+        <div class="card">
+          <h3>Agent 层</h3>
+          <p><code>crypto_agent/agents/</code> 负责图编排、resident run 审计和工具调用。它决定流程，不直接拥有账户账本。</p>
+        </div>
+        <div class="card">
+          <h3>工具层</h3>
+          <p><code>crypto_agent/tools/</code> 暴露受控原语，例如创建策略包、验证策略、部署策略、查询组合和开仓。</p>
+        </div>
+        <div class="card">
+          <h3>交易层</h3>
+          <p><code>crypto_agent/trading/</code> 负责 paper 账本、风险门禁、订单执行和 OKX live adapter contract。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>运行图</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 1060 430" role="img" aria-label="Python crypto agent architecture diagram">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#8e7d66"></path>
+            </marker>
+          </defs>
+          <rect class="node-soft" x="30" y="50" width="170" height="82" rx="8"></rect>
+          <text class="label" x="115" y="84" text-anchor="middle">IPC Client</text>
+          <text class="small" x="115" y="108" text-anchor="middle">crypto-agent-py-client</text>
+
+          <rect class="node" x="275" y="32" width="210" height="118" rx="8"></rect>
+          <text class="label" x="380" y="72" text-anchor="middle">Python Daemon</text>
+          <text class="small" x="380" y="99" text-anchor="middle">crypto-agent-py daemon</text>
+          <text class="small" x="380" y="121" text-anchor="middle">JSONL Unix socket</text>
+
+          <rect class="node-blue" x="570" y="30" width="190" height="82" rx="8"></rect>
+          <text class="label" x="665" y="63" text-anchor="middle">LangGraph</text>
+          <text class="small" x="665" y="88" text-anchor="middle">main / researcher / trader</text>
+
+          <rect class="node-green" x="830" y="30" width="190" height="82" rx="8"></rect>
+          <text class="label" x="925" y="63" text-anchor="middle">Tool Registry</text>
+          <text class="small" x="925" y="88" text-anchor="middle">strategy + trading tools</text>
+
+          <rect class="node" x="570" y="180" width="190" height="92" rx="8"></rect>
+          <text class="label" x="665" y="214" text-anchor="middle">Trading Services</text>
+          <text class="small" x="665" y="239" text-anchor="middle">PaperBroker / RiskGate</text>
+
+          <rect class="node-red" x="830" y="180" width="190" height="92" rx="8"></rect>
+          <text class="label" x="925" y="214" text-anchor="middle">Live Adapter</text>
+          <text class="small" x="925" y="239" text-anchor="middle">OKX swap parameters</text>
+
+          <rect class="node-soft" x="275" y="308" width="210" height="80" rx="8"></rect>
+          <text class="label" x="380" y="341" text-anchor="middle">SQLite</text>
+          <text class="small" x="380" y="365" text-anchor="middle">identity / audit / paper state</text>
+
+          <path class="arrow" d="M200 91 H275"></path>
+          <path class="arrow" d="M485 91 H570"></path>
+          <path class="arrow" d="M760 71 H830"></path>
+          <path class="arrow" d="M925 112 V180"></path>
+          <path class="arrow" d="M665 112 V180"></path>
+          <path class="arrow" d="M570 226 H485 V348"></path>
+          <path class="arrow" d="M830 226 H760"></path>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>闭环链路</h2>
+      <div class="callout">
+        <p>
+          核心不变量是所有研究、策略、下单和风控拒绝都能回溯到同一条身份链：
+          <code>funding_account -> trading_account -> trading_bot -> bot_allocation -> resident_agent -> agent_run</code>。
         </p>
+      </div>
+      <table>
+        <thead>
+          <tr><th>阶段</th><th>模块</th><th>产物</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>建库</td><td><code>crypto_agent/db/schema.py</code></td><td>默认 funding、trading account、bot、allocation。</td></tr>
+          <tr><td>研究</td><td><code>researcher_graph.py</code></td><td>策略包、验证报告、KB 记录。</td></tr>
+          <tr><td>验证</td><td><code>backtest/validators.py</code></td><td>通过或失败的 validation report。</td></tr>
+          <tr><td>交易</td><td><code>trader_graph.py</code></td><td>策略部署、paper order、fill、position、trade。</td></tr>
+          <tr><td>风控</td><td><code>trading/risk_gate.py</code></td><td>允许订单或持久化 risk denial。</td></tr>
+        </tbody>
+      </table>
+    </section>
 
-        <div class="hero-grid">
-          <div>
-            <div class="status-strip">
-              <div class="metric"><b>2</b><span>进程边界：daemon 持状态，CLI 只渲染和发送 IPC</span></div>
-              <div class="metric"><b>2</b><span>执行路径：LLM 工具慢路径 + 策略引擎快路径</span></div>
-              <div class="metric"><b>4</b><span>核心身份层：资金账户、交易账户、交易 bot、会话/agent</span></div>
-              <div class="metric"><b>42</b><span>当前测试文件数；Resident Agent 重构已覆盖关键路径</span></div>
-            </div>
-            <div class="tag-row">
-              <span class="tag good">LangGraph agent loop</span>
-              <span class="tag good">PaperBroker 本地撮合/记账</span>
-              <span class="tag good">OKX/CCXT live adapter</span>
-              <span class="tag info">Resident Agent scheduler</span>
-              <span class="tag warn">Mandate 回测审批平台未实现</span>
-              <span class="tag hot">旧 SQLite 不兼容，需要重建</span>
-            </div>
-          </div>
-          <div class="callout">
-            <h3>当前最重要的理解</h3>
-            <p>
-              交易层不是模拟 LLM。paper 模式只模拟执行和账户记账，行情仍来自真实公开市场数据。
-              LLM 可以通过工具创建 mandate、创建 resident trader、直接下单或创建策略；真正的资金隔离和审计落在
-              <code>trading_bot</code>、<code>bot_allocations</code>、<code>agent_runs</code>、<code>paper_orders</code>、
-              <code>paper_fills</code> 和 <code>trades</code> 上。
-            </p>
-          </div>
+    <section>
+      <h2>命令入口</h2>
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>本地验证</h3>
+          <pre><code>python3 -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev,agent]"
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests_py -q</code></pre>
         </div>
-      </article>
+        <div class="card">
+          <h3>闭环烟测</h3>
+          <pre><code>crypto-agent-py smoke \
+  --database-path data/smoke.db \
+  --profile-path agents/residents/btc-eth-researcher/AGENT.md \
+  --destructive</code></pre>
+        </div>
+        <div class="card">
+          <h3>Daemon</h3>
+          <pre><code>crypto-agent-py daemon \
+  --database-path data/crypto_agent.db \
+  --socket-path /tmp/crypto-agent-py.sock \
+  --environment development \
+  --init-db</code></pre>
+        </div>
+        <div class="card">
+          <h3>Docker</h3>
+          <pre><code>mkdir -p data runtime
+docker compose up -d --build
+docker compose exec crypto-agent \
+  crypto-agent-py-client \
+  --socket-path /run/crypto-agent/crypto-agent.sock \
+  health</code></pre>
+        </div>
+      </div>
+    </section>
 
-      <section id="map">
-        <div class="section-head">
-          <h2>系统总图</h2>
-          <p class="lead">
-            当前代码的真实边界是：CLI 通过 Unix socket 把用户输入交给 daemon；daemon 内部同时运行 LangGraph agent、
-            Resident Agent scheduler、策略快路径和交易账户。所有状态都在 daemon 进程和 SQLite 中。
-          </p>
+    <section>
+      <h2>当前限制</h2>
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>Live 交易</h3>
+          <p>OKX adapter 已有参数级实现和测试，但真实私有账户预检和真实下单仍需要单独 readiness pass。</p>
         </div>
-        <div class="diagram">
-          <svg viewBox="0 0 1120 560" width="1120" height="560" role="img" aria-label="Crypto Agent architecture">
-            <defs>
-              <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L0,6 L9,3 z" fill="#647987"></path>
-              </marker>
-            </defs>
-            <rect class="node blue" x="35" y="40" width="180" height="78" rx="8"></rect>
-            <text x="125" y="72" text-anchor="middle" font-weight="700">Ink CLI</text>
-            <text x="125" y="96" text-anchor="middle" font-size="13">薄客户端 / 渲染 / 输入</text>
-
-            <rect class="node" x="265" y="40" width="190" height="78" rx="8"></rect>
-            <text x="360" y="72" text-anchor="middle" font-weight="700">Unix Socket IPC</text>
-            <text x="360" y="96" text-anchor="middle" font-size="13">JSONL / streaming / cancel</text>
-
-            <rect class="node teal" x="505" y="30" width="245" height="110" rx="8"></rect>
-            <text x="627" y="64" text-anchor="middle" font-weight="700">CryptoDaemon</text>
-            <text x="627" y="88" text-anchor="middle" font-size="13">唯一状态持有者</text>
-            <text x="627" y="112" text-anchor="middle" font-size="13">sessions / broker / strategies / scheduler</text>
-
-            <rect class="node blue" x="820" y="36" width="240" height="92" rx="8"></rect>
-            <text x="940" y="68" text-anchor="middle" font-weight="700">CryptoAgent</text>
-            <text x="940" y="92" text-anchor="middle" font-size="13">LangGraph: call_model → tools</text>
-            <text x="940" y="114" text-anchor="middle" font-size="13">OpenAI / Anthropic / DeepSeek-compatible</text>
-
-            <rect class="node" x="45" y="205" width="205" height="94" rx="8"></rect>
-            <text x="148" y="237" text-anchor="middle" font-weight="700">Tool Registry</text>
-            <text x="148" y="261" text-anchor="middle" font-size="13">registerTool + deps 注入</text>
-            <text x="148" y="283" text-anchor="middle" font-size="13">trading / research / mandate / resident</text>
-
-            <rect class="node amber" x="310" y="190" width="230" height="124" rx="8"></rect>
-            <text x="425" y="222" text-anchor="middle" font-weight="700">Resident Agent Runtime</text>
-            <text x="425" y="246" text-anchor="middle" font-size="13">长期 trader / researcher</text>
-            <text x="425" y="268" text-anchor="middle" font-size="13">schedule 只负责 wake-up</text>
-            <text x="425" y="290" text-anchor="middle" font-size="13">run 前创建 agent_run</text>
-
-            <rect class="node green" x="595" y="190" width="230" height="124" rx="8"></rect>
-            <text x="710" y="222" text-anchor="middle" font-weight="700">Strategy Fast Path</text>
-            <text x="710" y="246" text-anchor="middle" font-size="13">MarketFeed → StrategyRuntime</text>
-            <text x="710" y="268" text-anchor="middle" font-size="13">RiskGate → OrderExecutor</text>
-            <text x="710" y="290" text-anchor="middle" font-size="13">无 LLM 延迟</text>
-
-            <rect class="node amber" x="875" y="190" width="205" height="124" rx="8"></rect>
-            <text x="978" y="222" text-anchor="middle" font-weight="700">Trading Layer</text>
-            <text x="978" y="246" text-anchor="middle" font-size="13">PaperBroker / LiveExchange</text>
-            <text x="978" y="268" text-anchor="middle" font-size="13">spot + USDT swap</text>
-            <text x="978" y="290" text-anchor="middle" font-size="13">CCXT market data</text>
-
-            <rect class="node" x="210" y="405" width="260" height="94" rx="8"></rect>
-            <text x="340" y="437" text-anchor="middle" font-weight="700">SQLite Memory</text>
-            <text x="340" y="461" text-anchor="middle" font-size="13">sessions / trades / strategies</text>
-            <text x="340" y="483" text-anchor="middle" font-size="13">mandates / resident_agents / runs</text>
-
-            <rect class="node" x="520" y="405" width="260" height="94" rx="8"></rect>
-            <text x="650" y="437" text-anchor="middle" font-weight="700">Audit + Recovery</text>
-            <text x="650" y="461" text-anchor="middle" font-size="13">pending_orders / active_positions</text>
-            <text x="650" y="483" text-anchor="middle" font-size="13">daily_pnl / watermark / fills</text>
-
-            <rect class="node red" x="830" y="405" width="220" height="94" rx="8"></rect>
-            <text x="940" y="437" text-anchor="middle" font-weight="700">Risk Controls</text>
-            <text x="940" y="461" text-anchor="middle" font-size="13">TradeGuard + RiskGate</text>
-            <text x="940" y="483" text-anchor="middle" font-size="13">global trade lock</text>
-
-            <path class="arrow" d="M215 79 L265 79"></path>
-            <path class="arrow" d="M455 79 L505 79"></path>
-            <path class="arrow" d="M750 82 L820 82"></path>
-            <path class="arrow" d="M902 128 C855 158 770 170 720 190"></path>
-            <path class="arrow" d="M890 128 C710 165 560 180 445 190"></path>
-            <path class="arrow" d="M820 116 C620 175 370 188 250 222"></path>
-            <path class="arrow" d="M540 252 L595 252"></path>
-            <path class="arrow" d="M825 252 L875 252"></path>
-            <path class="arrow" d="M978 314 C940 355 830 385 780 424"></path>
-            <path class="arrow" d="M425 314 C400 350 365 380 340 405"></path>
-            <path class="arrow" d="M710 314 C690 350 665 380 650 405"></path>
-            <path class="arrow dash" d="M940 405 C980 360 1010 330 1000 314"></path>
-          </svg>
+        <div class="card">
+          <h3>UI</h3>
+          <p>旧 Ink UI 已删除。当前可通过 Python CLI client 调 daemon，之后可以独立做新的 UI，不影响交易核心。</p>
         </div>
-      </section>
-
-      <section id="identity">
-        <div class="section-head">
-          <h2>账户与 agent 映射</h2>
-          <p class="lead">
-            这是这次重构最关键的闭环。资金不是 session 的属性，也不是 LLM prompt 里的约定，而是落在 bot allocation 上。
-            Resident Trader 必须绑定 active strategy mandate 和 capital allocation 后才能运行。
-          </p>
-        </div>
-        <div class="diagram">
-          <svg viewBox="0 0 1120 260" width="1120" height="260" role="img" aria-label="Identity mapping">
-            <defs>
-              <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-                <path d="M0,0 L0,6 L9,3 z" fill="#647987"></path>
-              </marker>
-            </defs>
-            <path class="arrow" marker-end="url(#arrow2)" d="M170 120 L260 120"></path>
-            <path class="arrow" marker-end="url(#arrow2)" d="M420 120 L510 120"></path>
-            <path class="arrow" marker-end="url(#arrow2)" d="M670 120 L760 120"></path>
-            <path class="arrow" marker-end="url(#arrow2)" d="M920 120 L1010 120"></path>
-            <rect class="node" x="30" y="76" width="140" height="88" rx="8"></rect>
-            <text x="100" y="110" text-anchor="middle" font-weight="700">Funding</text>
-            <text x="100" y="134" text-anchor="middle" font-size="13">资金所有者</text>
-            <rect class="node blue" x="270" y="76" width="150" height="88" rx="8"></rect>
-            <text x="345" y="110" text-anchor="middle" font-weight="700">Trading Account</text>
-            <text x="345" y="134" text-anchor="middle" font-size="13">OKX / PAPER / LIVE</text>
-            <rect class="node green" x="520" y="76" width="150" height="88" rx="8"></rect>
-            <text x="595" y="110" text-anchor="middle" font-weight="700">Trading Bot</text>
-            <text x="595" y="134" text-anchor="middle" font-size="13">独立资金分配</text>
-            <rect class="node amber" x="770" y="76" width="150" height="88" rx="8"></rect>
-            <text x="845" y="110" text-anchor="middle" font-weight="700">Resident Agent</text>
-            <text x="845" y="134" text-anchor="middle" font-size="13">长期交易员/研究员</text>
-            <rect class="node" x="1010" y="76" width="90" height="88" rx="8"></rect>
-            <text x="1055" y="110" text-anchor="middle" font-weight="700">Session</text>
-            <text x="1055" y="134" text-anchor="middle" font-size="13">上下文</text>
-            <rect class="node teal" x="520" y="190" width="400" height="48" rx="8"></rect>
-            <text x="720" y="220" text-anchor="middle" font-size="14">Strategy Mandate 通过 agent_mandate_assignments 分配给 Resident Agent</text>
-            <path class="arrow dash" marker-end="url(#arrow2)" d="M845 164 L845 190"></path>
-            <path class="arrow dash" marker-end="url(#arrow2)" d="M595 164 L595 190"></path>
-          </svg>
-        </div>
-        <div class="grid two" style="margin-top:16px">
-          <div class="card">
-            <h3>为什么不是 sub-agent</h3>
-            <p>
-              旧的 <code>sub-agents.ts</code> 仍是一次性任务委派，例如 <code>/research</code> 触发 strategist loop。
-              新的 Resident Agent 是长期独立 actor，有自己的 session、schedule、bot、allocation、run history。
-              它不是主 Agent 的临时工具调用结果。
-            </p>
-          </div>
-          <div class="card">
-            <h3>为什么不是 schedule 本身</h3>
-            <p>
-              <code>schedule_expr</code> 只表示“什么时候醒来”。策略依据来自 <code>strategy_mandates</code>，
-              资金边界来自 <code>bot_allocations</code>，风险边界来自 <code>risk_policy</code> 和统一风险门。
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section id="runtime">
-        <div class="section-head">
-          <h2>主 Agent 运行流</h2>
-          <p class="lead">
-            主 Agent 是用户面对的控制平面。它接收 CLI 消息、维护会话上下文、注入当前世界状态，并通过 LangGraph 循环调用模型和工具。
-          </p>
-        </div>
-        <div class="timeline">
-          <div class="step"><div class="step-body"><h3>CLI 发起请求</h3><p><code>src/cli.ts</code> 渲染 Ink UI，<code>IpcClient</code> 通过 Unix socket 发送 <code>chat</code>、<code>slash</code>、<code>status</code>、<code>cancel</code>。</p></div></div>
-          <div class="step"><div class="step-body"><h3>daemon 保存用户消息</h3><p><code>CryptoDaemon.handleChat()</code> 解析 session，先写 <code>conversations</code>，再调用 <code>CryptoAgent.chatInSession()</code>。</p></div></div>
-          <div class="step"><div class="step-body"><h3>上下文压缩与当前状态注入</h3><p><code>microCompact</code> 压缩旧工具结果，<code>autoCompact</code> 可生成摘要；<code>buildWorldSnapshot</code> 查询资金、持仓、订单、策略，并由 <code>injectEphemeralCurrentState</code> 临时附加到本轮 user message。</p></div></div>
-          <div class="step"><div class="step-body"><h3>LangGraph 执行循环</h3><p><code>createAgentGraphRuntime()</code> 编译一个两节点图：<code>call_model</code> 调 provider，若模型返回 tool call，则进入 <code>tools</code>，之后回到模型直到没有 tool call。</p></div></div>
-          <div class="step"><div class="step-body"><h3>工具依赖注入</h3><p><code>dispatchAgentTool()</code> 根据 <code>TOOL_DEPS</code> 注入 <code>memory</code>、<code>broker</code>、<code>market_data</code>、<code>sessionId</code> 等，不在 agent loop 里为每个工具写分支。</p></div></div>
-          <div class="step"><div class="step-body"><h3>结果流回 CLI</h3><p>daemon 通过 IPC 发送 <code>delta</code>、<code>tool_use</code>、<code>done</code>；CLI 可取消请求，server 侧 abort provider stream。</p></div></div>
-        </div>
-        <div class="code" style="margin-top:16px"><span class="muted">// 核心图形状，见 src/agent/langgraph-runtime.ts:46</span>
-START → <span class="accent">call_model</span> → routeAfterModel
-          ├─ no tool call → END
-          └─ tool call    → <span class="good">tools</span> → call_model</div>
-      </section>
-
-      <section id="resident">
-        <div class="section-head">
-          <h2>Resident Agent 生命周期</h2>
-          <p class="lead">
-            Resident Agent 是这次重构后的长期自主 actor。主 Agent 可以用工具创建它，但创建出来以后，它由 daemon 的 scheduler 定期唤醒。
-          </p>
-        </div>
-        <div class="grid">
-          <div class="card">
-            <h3>1. 创建 Mandate</h3>
-            <p><code>strategy_mandate</code> 写入 <code>strategy_mandates</code>。它是策略手册资源，包含结构化 body、状态、验证状态和验证备注。</p>
-            <div class="tag-row"><span class="tag info">draft</span><span class="tag good">active</span><span class="tag warn">validation_status</span></div>
-          </div>
-          <div class="card">
-            <h3>2. 创建 Resident Agent</h3>
-            <p><code>resident_agent.spawn</code> 创建专属 <code>trading_bot</code>、USDT allocation、system session、agent row，并绑定 active mandate。</p>
-            <div class="tag-row"><span class="tag good">dedicated bot</span><span class="tag good">capital_usdt</span><span class="tag info">schedule_expr</span></div>
-          </div>
-          <div class="card">
-            <h3>3. 定时唤醒</h3>
-            <p><code>runDueResidentAgents()</code> 查 due agent，先推进 <code>next_run</code>，再调用 runtime，避免 LLM 失败后 30 秒重复触发。</p>
-            <div class="tag-row"><span class="tag good">failure-safe scheduling</span><span class="tag warn">every_Nm only</span></div>
-          </div>
-          <div class="card">
-            <h3>4. 构造运行 prompt</h3>
-            <p><code>ResidentAgentRuntime</code> 写入 role contract、agent profile、risk policy、assigned mandates 和 run instructions。</p>
-          </div>
-          <div class="card">
-            <h3>5. 创建 agent_run</h3>
-            <p>runtime 在调用 LLM 之前创建 <code>agent_runs</code>。因此工具下单时可通过 session 找到 active run 做审计归因。</p>
-          </div>
-          <div class="card">
-            <h3>6. 工具归因到交易</h3>
-            <p><code>resolveToolTradingContext()</code> 将 resident session 映射到 <code>actorType=resident_agent</code>、run、mandate、allocation。</p>
-          </div>
-        </div>
-        <div class="callout warn" style="margin-top:16px">
-          <h3>上线门禁现状</h3>
-          <p>
-            Trader runtime 现在要求 trader 必须有 active assigned mandate，但不强制 mandate 的 <code>validation_status=validated</code>。
-            原因是完整回测审批平台还没做。当前只是记录 <code>deferred / pending / validated / rejected</code>，后续 R1 平台再把它变成上线门禁。
-          </p>
-        </div>
-      </section>
-
-      <section id="trading">
-        <div class="section-head">
-          <h2>交易层</h2>
-          <p class="lead">
-            交易层有一个清晰边界：观察行情和执行交易是分开的。paper 模式不需要交易 API key，因为执行本地模拟；live 模式才调用真实交易接口。
-          </p>
-        </div>
-        <div class="split">
-          <div class="card">
-            <h3>Paper 模式</h3>
-            <p>
-              <code>CcxtMarketDataProvider</code> 读取公开 ticker/OHLCV/orderbook；
-              <code>PaperBroker</code> 负责订单、余额、仓位、保证金、PnL、fills。spot 和 USDT 线性合约都在 SQLite 内记账。
-            </p>
-            <div class="tag-row">
-              <span class="tag good">无需交易 API key</span>
-              <span class="tag good">本地订单簿</span>
-              <span class="tag info">mark-to-market</span>
-              <span class="tag warn">未模拟资金费率/强平</span>
-            </div>
-          </div>
-          <div class="card">
-            <h3>Live 模式</h3>
-            <p>
-              <code>LiveExchange</code> 是 CCXT wrapper。spot 直接下单；swap 会设置 leverage，传 <code>marginMode</code>、<code>positionSide</code>、
-              <code>reduceOnly</code>。<code>CONTRACT_POSITION_MODE=auto</code> 会检测 OKX one-way/hedge 并映射 posSide。
-            </p>
-            <div class="tag-row">
-              <span class="tag hot">真实资金</span>
-              <span class="tag info">setLeverage</span>
-              <span class="tag info">auto position mode</span>
-            </div>
-          </div>
-        </div>
-        <div class="table-wrap" style="margin-top:16px">
-          <table>
-            <thead><tr><th>入口</th><th>用途</th><th>paper 路径</th><th>live 路径</th><th>审计字段</th></tr></thead>
-            <tbody>
-              <tr><td><code>buy</code> / <code>sell</code></td><td>现货买卖</td><td><code>broker.createOrder(marketType=spot)</code></td><td><code>exchange.createOrder()</code></td><td>session/bot/account/run/mandate/allocation</td></tr>
-              <tr><td><code>open_position</code></td><td>开 USDT 合约 long/short</td><td><code>PaperBroker.fillSwapOrder()</code></td><td>CCXT swap order + leverage + margin params</td><td>同上</td></tr>
-              <tr><td><code>close_position</code></td><td>reduce-only 平仓</td><td>释放 margin，写 realized PnL</td><td>CCXT reduceOnly</td><td>同上</td></tr>
-              <tr><td><code>OrderExecutor</code></td><td>策略快路径自动交易</td><td>broker + strategy actor</td><td>exchange + contract params</td><td>strategy_id / bot / account</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="fastpath">
-        <div class="section-head">
-          <h2>策略快路径</h2>
-          <p class="lead">
-            快路径是为了让策略按行情事件执行，不等 LLM 思考。LLM 负责创建策略，策略 runtime 负责订阅行情、发信号、过风险门、下单。
-          </p>
-        </div>
-        <div class="diagram">
-          <svg viewBox="0 0 1040 270" width="1040" height="270" role="img" aria-label="Strategy fast path">
-            <defs><marker id="arrow3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#647987"></path></marker></defs>
-            <rect class="node blue" x="30" y="80" width="150" height="70" rx="8"></rect>
-            <text x="105" y="111" text-anchor="middle" font-weight="700">MarketFeed</text>
-            <text x="105" y="134" text-anchor="middle" font-size="13">ticker / candle</text>
-            <rect class="node green" x="230" y="65" width="170" height="100" rx="8"></rect>
-            <text x="315" y="98" text-anchor="middle" font-weight="700">StrategyRuntime</text>
-            <text x="315" y="122" text-anchor="middle" font-size="13">Signal / Ladder / Grid</text>
-            <text x="315" y="144" text-anchor="middle" font-size="13">signals</text>
-            <rect class="node red" x="455" y="80" width="145" height="70" rx="8"></rect>
-            <text x="528" y="111" text-anchor="middle" font-weight="700">RiskGate</text>
-            <text x="528" y="134" text-anchor="middle" font-size="13">shared guard</text>
-            <rect class="node amber" x="655" y="65" width="170" height="100" rx="8"></rect>
-            <text x="740" y="98" text-anchor="middle" font-weight="700">OrderExecutor</text>
-            <text x="740" y="122" text-anchor="middle" font-size="13">market / limit</text>
-            <text x="740" y="144" text-anchor="middle" font-size="13">SL / TP monitor</text>
-            <rect class="node" x="880" y="80" width="130" height="70" rx="8"></rect>
-            <text x="945" y="111" text-anchor="middle" font-weight="700">Broker / Exchange</text>
-            <text x="945" y="134" text-anchor="middle" font-size="13">fill + audit</text>
-            <path class="arrow" marker-end="url(#arrow3)" d="M180 115 L230 115"></path>
-            <path class="arrow" marker-end="url(#arrow3)" d="M400 115 L455 115"></path>
-            <path class="arrow" marker-end="url(#arrow3)" d="M600 115 L655 115"></path>
-            <path class="arrow" marker-end="url(#arrow3)" d="M825 115 L880 115"></path>
-            <path class="arrow dash" marker-end="url(#arrow3)" d="M740 165 C720 205 380 210 315 165"></path>
-            <text x="520" y="224" text-anchor="middle" font-size="13">fills/exits 回传给策略，grid/ladder 可继续挂后续订单</text>
-          </svg>
-        </div>
-        <div class="grid" style="margin-top:16px">
-          <div class="card"><h3>SignalStrategy</h3><p>基于 <code>Condition[]</code> 的指标条件；与 backtest 共用 evaluator，减少回测/实盘逻辑偏差。</p></div>
-          <div class="card"><h3>LadderStrategy</h3><p>多价位分批进入，按加权均价统一 TP/SL。适合分层建仓。</p></div>
-          <div class="card"><h3>GridStrategy</h3><p>区间内挂 limit buy，并在成交后放 follow-up sell。更适合震荡行情，趋势行情风险较大。</p></div>
-        </div>
-      </section>
-
-      <section id="persistence">
-        <div class="section-head">
-          <h2>SQLite 持久化</h2>
-          <p class="lead">
-            持久化原则：丢失会导致资金损失、审计缺口、风控绕过或严重 UX 回退的状态必须存。行情这种可重建外部数据不存。
-          </p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>组</th><th>表</th><th>保存什么</th><th>为什么重要</th></tr></thead>
-            <tbody>
-              <tr><td>身份</td><td><code>funding_accounts</code>, <code>trading_accounts</code>, <code>trading_bots</code>, <code>sessions</code></td><td>资金池、交易账户、bot、会话绑定</td><td>明确资金和对话的所有权</td></tr>
-              <tr><td>交易审计</td><td><code>trades</code>, <code>paper_orders</code>, <code>paper_fills</code>, <code>paper_positions</code></td><td>订单、成交、仓位、交易日志</td><td>重启后仍知道发生过什么</td></tr>
-              <tr><td>恢复</td><td><code>pending_orders</code>, <code>active_positions</code>, <code>daily_pnl</code>, <code>portfolio_watermark</code></td><td>未决订单、SL/TP、日内 PnL、高水位</td><td>避免重启绕过风控或丢失止损</td></tr>
-              <tr><td>策略</td><td><code>strategies</code>, <code>risk_params</code>, <code>strategy_kb</code></td><td>策略快照、风控参数、研究结果</td><td>策略和研究结果可恢复</td></tr>
-              <tr><td>Resident</td><td><code>strategy_mandates</code>, <code>resident_agents</code>, <code>agent_mandate_assignments</code>, <code>agent_runs</code>, <code>agent_events</code></td><td>长期 agent、策略手册、运行记录</td><td>长期交易员可审计、可调度、可暂停</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="callout danger" style="margin-top:16px">
-          <h3>不做旧库兼容</h3>
-          <p>
-            当前 schema 不再保留 <code>llm_trader_jobs</code>，也没有 <code>ALTER TABLE</code> 迁移兼容路径。
-            旧 SQLite 数据库需要删除或重建后再部署当前分支。这是刻意选择，不是遗漏。
-          </p>
-        </div>
-      </section>
-
-      <section id="risk">
-        <div class="section-head">
-          <h2>风险、锁与恢复</h2>
-          <p class="lead">
-            风险不是只靠 prompt。慢路径工具和快路径策略都共享 <code>checkTradeAllowed()</code> 和全局 <code>tradeLock</code>。
-          </p>
-        </div>
-        <div class="grid two">
-          <div class="card">
-            <h3>统一风险门</h3>
-            <p>
-              <code>trade-guard.ts</code> 检查最大订单、仓位占比、总敞口、并发持仓、余额、drawdown 和 daily loss。
-              LLM 现货工具直接调用，快路径通过 <code>RiskGate</code> 调用。
-            </p>
-          </div>
-          <div class="card">
-            <h3>全局交易锁</h3>
-            <p>
-              <code>trade-lock.ts</code> 串行化 risk-check + order-placement，避免两个会话或 LLM 与策略快路径同时改同一账户。
-            </p>
-          </div>
-          <div class="card">
-            <h3>重启恢复</h3>
-            <p>
-              daemon 启动时恢复策略、active positions、pending orders；本地记录和交易所/纸面 broker 不一致时会标记 stale 或 orphan。
-            </p>
-          </div>
-          <div class="card">
-            <h3>当前限制</h3>
-            <p>
-              paper 未模拟资金费率、强平和真实订单簿深度；Resident mandate 验证还不是强制上线门禁；live trading 仍需要人工确认配置和 key 权限。
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section id="tools">
-        <div class="section-head">
-          <h2>工具与命令</h2>
-          <p class="lead">
-            工具是 LangGraph agent 的能力面；slash command 是 daemon 本地管理面。二者都运行在 daemon 进程，不在 CLI 里持状态。
-          </p>
-        </div>
-        <div class="grid">
-          <div class="card"><h3>交易工具</h3><p><code>buy</code>, <code>sell</code>, <code>open_position</code>, <code>close_position</code>, <code>cancel_order</code>, <code>get_portfolio</code>, <code>assess_risk</code></p></div>
-          <div class="card"><h3>策略工具</h3><p><code>backtest</code>, <code>plan_strategy</code>, <code>plan_ladder_strategy</code>, <code>plan_grid_strategy</code>, <code>manage_rules</code></p></div>
-          <div class="card"><h3>Resident 工具</h3><p><code>strategy_mandate</code> 管理策略手册；<code>resident_agent</code> 管理长期 trader/researcher/risk_monitor/strategist。</p></div>
-          <div class="card"><h3>上下文工具</h3><p><code>compact</code>, <code>session</code>, <code>load_skill</code>, <code>delegate</code>。其中 delegate 是旧的一次性角色任务，不是 Resident Agent。</p></div>
-          <div class="card"><h3>研究工具</h3><p><code>get_news</code>, <code>get_chain_stats</code>, <code>analyze</code>, <code>kb_search</code>, <code>kb_log</code>。</p></div>
-          <div class="card"><h3>daemon 命令</h3><p><code>/sessions</code>, <code>/switch</code>, <code>/trades</code>, <code>/strategies</code>, <code>/budget</code>, <code>/risk</code>, <code>/engine</code>, <code>/research</code>, <code>/kb</code>。</p></div>
-        </div>
-      </section>
-
-      <section id="config">
-        <div class="section-head">
-          <h2>配置与部署</h2>
-          <p class="lead">
-            配置来自环境变量和 <code>.env</code>。生产推荐 daemon 长驻，CLI 多实例连接同一个 socket。Docker 部署会挂载 data/runtime，避免重建镜像丢状态。
-          </p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>分类</th><th>变量/文件</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr><td>LLM</td><td><code>LLM_PROVIDER</code>, <code>API_KEY</code>, <code>API_BASE_URL</code>, <code>MODEL_ID</code></td><td>OpenAI/Anthropic/兼容 OpenAI 的 DeepSeek 端点。DeepSeek 路径会禁用压缩流。</td></tr>
-              <tr><td>交易所</td><td><code>DEFAULT_EXCHANGE</code>, <code>EXCHANGE_API_KEY</code>, <code>EXCHANGE_SECRET</code>, <code>EXCHANGE_PASSWORD</code></td><td>live 模式需要；paper 仅行情不需要交易权限。</td></tr>
-              <tr><td>Paper</td><td><code>PAPER_TRADING</code>, <code>INITIAL_BALANCE_USDT</code>, <code>PAPER_MAX_LEVERAGE</code></td><td>本地 paper broker 的初始资金与杠杆上限。</td></tr>
-              <tr><td>合约</td><td><code>CONTRACT_MARGIN_MODE</code>, <code>CONTRACT_POSITION_MODE</code>, <code>CONTRACT_MAX_LEVERAGE</code></td><td>live swap 参数，position mode 可设 auto/net/hedge。</td></tr>
-              <tr><td>运行</td><td><code>MEMORY_DB_PATH</code>, <code>CRYPTO_AGENT_RUNTIME_DIR</code>, <code>CRYPTO_AGENT_SOCK</code></td><td>SQLite、socket、pid 文件位置。</td></tr>
-              <tr><td>Docker</td><td><code>Dockerfile</code>, <code>docker-compose.yml</code>, <code>docs/docker-deploy.md</code></td><td>daemon in container，data/runtime volume 持久化。</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="code" style="margin-top:16px"><span class="muted"># 常用本地启动</span>
-npm run daemon    <span class="muted"># terminal 1, 持状态</span>
-npm run dev       <span class="muted"># terminal 2, CLI 连接 daemon</span>
-
-<span class="muted"># 构建与测试</span>
-npm run build
-npm test</div>
-      </section>
-
-      <section id="testing">
-        <div class="section-head">
-          <h2>测试与当前状态</h2>
-          <p class="lead">
-            测试覆盖了 LangGraph runtime、IPC、paper broker、live 合约参数、策略、风险、Resident Agent、Mandate 工具和 no-compat 边界。
-          </p>
-        </div>
-        <div class="grid four">
-          <div class="metric"><b>42</b><span>test/*.test.ts 文件</span></div>
-          <div class="metric"><b>281</b><span>当前通过用例数</span></div>
-          <div class="metric"><b>1</b><span>跳过用例</span></div>
-          <div class="metric"><b>0</b><span>旧 trader-job 代码残留</span></div>
-        </div>
-        <div class="callout" style="margin-top:16px">
-          <h3>提交前需要保持的验证</h3>
-          <p>
-            这份文档生成时的目标验证命令是：<code>npm test</code>、<code>npm run build</code>、<code>git diff --check</code>，
-            以及临时 DB 的 daemon smoke。最终提交前应以命令输出为准。
-          </p>
-        </div>
-      </section>
-
-      <section id="roadmap">
-        <div class="section-head">
-          <h2>后续边界</h2>
-          <p class="lead">
-            以下不是当前重构遗漏，而是明确延后或需要产品决策的内容。尤其不要把它们混进交易执行层。
-          </p>
-        </div>
-        <div class="grid two">
-          <div class="card">
-            <h3>R1: Mandate 回测审批平台</h3>
-            <p>把 researcher 生成的 mandate 输入可重复回测、walk-forward、证据存档和审批流程。未来可以禁止未验证 mandate 分配给 unattended trader。</p>
-          </div>
-          <div class="card">
-            <h3>Resident Researcher</h3>
-            <p>当前 runtime 支持 researcher role contract，但工具面主要先闭合 trader。研究员如何写入 mandate 草稿、如何通知主 Agent，还需要进一步产品化。</p>
-          </div>
-          <div class="card">
-            <h3>Live 多 bot 风险隔离</h3>
-            <p>paper 已有 bot allocation。live 模式下多 bot 共享真实交易账户，必须进一步明确交易所子账户、仓位隔离或软预算 enforcement。</p>
-          </div>
-          <div class="card">
-            <h3>生产观测</h3>
-            <p>当前有日志、事件和 DB 审计，但还没有完整指标、trace、alert、LLM token 成本和缓存率观测面板。</p>
-          </div>
-        </div>
-      </section>
-
-      <section id="source">
-        <div class="section-head">
-          <h2>来源索引</h2>
-          <p class="lead">
-            本页来自当前本地工作区源码，不读取 <code>.env</code>、数据库、运行时 socket、node_modules 或远端服务器状态。
-            主要读取范围：<strong>133</strong> 个源码/测试/文档文件，约 <strong>19,774</strong> 行；其中 <code>src/*.ts</code> 约 <strong>12,248</strong> 行。
-          </p>
-        </div>
-        <div class="source-filter">
-          <input id="sourceSearch" type="search" placeholder="过滤来源，例如 resident / broker / daemon / risk">
-          <button id="copySummary" type="button">复制项目摘要</button><span id="copyFeedback" class="copy-feedback"></span>
-        </div>
-        <div class="table-wrap">
-          <table id="sourceTable">
-            <thead><tr><th>文件</th><th>关键位置</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr><td><code>src/daemon.ts</code></td><td>30, 51, 334, 635, 678, 776</td><td>daemon 构造、IPC handler、slash command、订单恢复、快路径启动、cron/resident 调度</td></tr>
-              <tr><td><code>src/agent.ts</code></td><td>52, 123, 167, 184</td><td>主 agent、paper broker 配置、world snapshot、chatInSession</td></tr>
-              <tr><td><code>src/agent/langgraph-runtime.ts</code></td><td>46</td><td>LangGraph call_model/tools 循环</td></tr>
-              <tr><td><code>src/agent/provider-step.ts</code></td><td>43, 84, 137</td><td>OpenAI/Anthropic tool-call 适配、流式输出、DeepSeek 非流式路径</td></tr>
-              <tr><td><code>src/agent/tool-dispatch.ts</code></td><td>24</td><td>工具依赖注入</td></tr>
-              <tr><td><code>src/agents/runtime.ts</code></td><td>28, 34, 73, 119</td><td>Resident Agent schedule、role contract、run prompt、run lifecycle</td></tr>
-              <tr><td><code>src/agents/scheduler.ts</code></td><td>22</td><td>due resident agent 调度，先推进 next_run 再执行</td></tr>
-              <tr><td><code>src/tools/resident-agent.ts</code></td><td>33</td><td>spawn/status/pause/resume 长期 agent 工具</td></tr>
-              <tr><td><code>src/tools/strategy-mandate.ts</code></td><td>29</td><td>策略手册资源工具和 validation status</td></tr>
-              <tr><td><code>src/tools/trading-context.ts</code></td><td>13</td><td>session 到 bot/account/agent_run/mandate/allocation 的运行时映射</td></tr>
-              <tr><td><code>src/memory.ts</code></td><td>330-657, 919, 1477, 1721, 1787, 1950</td><td>SQLite schema、trade log、paper order/fill、mandate、resident agent、agent run</td></tr>
-              <tr><td><code>src/broker/paper-broker.ts</code></td><td>15, 27, 221, 366</td><td>paper broker、本地订单、swap 保证金/PnL、fill 审计</td></tr>
-              <tr><td><code>src/exchange/live.ts</code></td><td>4, 49, 166, 190</td><td>CCXT live adapter、合约参数、仓位模式 auto、setLeverage</td></tr>
-              <tr><td><code>src/strategy/manager.ts</code></td><td>14, 83, 188</td><td>策略工厂、CRUD、预算计算</td></tr>
-              <tr><td><code>src/strategy/runtime.ts</code></td><td>20, 46, 112</td><td>MarketFeed 和策略实例协调、订单成交回调</td></tr>
-              <tr><td><code>src/strategy/executor.ts</code></td><td>20, 135, 218, 384</td><td>策略信号执行、恢复、limit fill、SL/TP</td></tr>
-              <tr><td><code>src/trade-guard.ts</code></td><td>47</td><td>统一风险检查</td></tr>
-              <tr><td><code>src/trade-lock.ts</code></td><td>85</td><td>全局交易锁</td></tr>
-              <tr><td><code>src/backtest.ts</code></td><td>22, 50</td><td>轻量 backtest engine，含 condition-based 回测</td></tr>
-              <tr><td><code>docs/persistence.md</code></td><td>1-260</td><td>持久化原则、实现范围、deferred R1 回测审批平台</td></tr>
-              <tr><td><code>test/no-compat.test.ts</code></td><td>23</td><td>不保留旧 schema/migration/trader-job 兼容路径</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="footer">
-          Generated from the local repository at <code>/home/leoric/code/crypto-agent</code> on 2026-06-21 Asia/Shanghai.
-          Excluded intentionally: <code>node_modules</code>, <code>dist</code>, <code>.env</code>, runtime sockets, SQLite DB contents, remote deployment logs.
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <script>
-    const search = document.getElementById("sourceSearch");
-    const rows = Array.from(document.querySelectorAll("#sourceTable tbody tr"));
-    search.addEventListener("input", () => {
-      const q = search.value.trim().toLowerCase();
-      for (const row of rows) {
-        row.style.display = row.textContent.toLowerCase().includes(q) ? "" : "none";
-      }
-    });
-
-    const summary = [
-      "Crypto Agent 是一个长驻 daemon + 薄 CLI 的加密交易 agent。",
-      "主 Agent 使用 LangGraph call_model/tools 循环，工具通过 registry 注入 memory/broker/market_data/sessionId 等依赖。",
-      "paper 模式使用真实公开行情 + 本地 PaperBroker 执行和记账；live 模式通过 CCXT LiveExchange 下单。",
-      "Resident Agent 是长期 actor，绑定 trading_bot、capital allocation、strategy mandate 和 system session，由 daemon scheduler 唤醒。",
-      "交易审计会记录 bot/account/agent_run/mandate/allocation；旧 llm_trader_job 路径已删除，旧 SQLite 不兼容。",
-      "Mandate 当前记录 validation_status，但完整回测审批平台仍是 deferred R1。"
-    ].join("\\n");
-
-    document.getElementById("copySummary").addEventListener("click", async () => {
-      const feedback = document.getElementById("copyFeedback");
-      try {
-        await navigator.clipboard.writeText(summary);
-        feedback.textContent = "已复制";
-        setTimeout(() => { feedback.textContent = ""; }, 1800);
-      } catch {
-        feedback.textContent = "复制失败";
-      }
-    });
-  </script>
+      </div>
+    </section>
+  </main>
 </body>
 </html>

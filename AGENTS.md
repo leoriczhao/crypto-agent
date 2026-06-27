@@ -1,112 +1,143 @@
+## First Principles & Active Skepticism
+
+Reason from first principles: derive conclusions from fundamental truths and
+base logic, not from analogy, convention, or "that's how it's done."
+
+- If a question contains a questionable premise, call it out before answering.
+- If a better path exists than what the user proposed, say so directly.
+- Distinguish between fact, which must be respected, and convention, which can
+  be challenged.
+- When challenging something, name the assumption, explain why it is flawed, and
+  offer a concrete alternative.
+
+--- project-doc ---
+
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This repository is now a Python-only crypto trading agent. The previous
+TypeScript daemon, Ink UI, npm workflow, Vitest tests, and Node deployment have
+been removed as part of a breaking migration.
 
 ## Project Overview
 
-LLM-powered crypto trading agent with paper/live trading via CCXT. Client-server architecture: a long-lived daemon holds all stateful components (agent, strategy engine, sessions) and exposes a Unix-socket IPC endpoint; one or more thin CLI clients attach to it. Supports OpenAI and Anthropic as LLM providers.
+The runtime is a long-lived Python daemon with:
+
+- Python LangGraph graphs for main, researcher, trader, and resident flows.
+- Python tool registry for strategy and trading actions.
+- Python trading services for paper execution, live OKX adapter contracts, risk
+  gates, order execution, strategy validation, and backtesting.
+- SQLite persistence through the Python schema in `crypto_agent/db/schema.py`.
+- Docker deployment through `Dockerfile` and `docker-compose.yml`.
+
+Production should run exactly one Docker daemon. Do not reintroduce a user
+systemd Node service or npm-based daemon.
 
 ## Commands
 
 ```bash
-npm run build          # TypeScript → dist/
-npm run daemon         # Start the daemon (foreground, blocks terminal)
-npm run dev:daemon     # Alias for `daemon`
-npm run dev            # Start a CLI client (connects to running daemon)
-npm test               # Vitest (230+ tests, 15s timeout)
-npm run test:watch     # Watch mode
-npx vitest run test/tools.test.ts              # Single test file
-npx vitest run test/tools.test.ts -t "buy"     # Single test by name
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev,agent]"
+
+crypto-agent-py health
+crypto-agent-py init-db --database-path data/crypto_agent.db --destructive
+crypto-agent-py smoke \
+  --database-path data/smoke.db \
+  --profile-path agents/residents/btc-eth-researcher/AGENT.md \
+  --destructive
+
+crypto-agent-py daemon \
+  --database-path data/crypto_agent.db \
+  --socket-path /tmp/crypto-agent-py.sock \
+  --environment development \
+  --init-db
+
+crypto-agent-py-client --socket-path /tmp/crypto-agent-py.sock health
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest tests_py -q
+docker compose up -d --build
 ```
-
-**Typical workflow**: run `npm run daemon` in one terminal, `npm run dev` in another. Multiple CLI clients can attach to the same daemon concurrently.
-
-**Production (user-level systemd)**: `npm run install:service` generates `~/.config/systemd/user/crypto-agent.service` from `systemd/crypto-agent.service.template` (substitutes the actual node binary path so nvm installs work) and enables it. Use `systemctl --user {start,stop,restart,status} crypto-agent` thereafter. `npm run uninstall:service` removes it. Logs go to `~/.local/state/crypto-agent/`.
 
 ## Architecture
 
-### Client-Server Split (two processes)
+### Python Daemon
 
-- **Daemon** (`src/daemon.ts`) — long-running, headless (no REPL). Holds the single `CryptoAgent` + `StrategyManager` + `StrategyRuntime` + `HeartbeatScheduler` + cron + `SessionManager`. Writes logs to stderr. PID-locked via `src/ipc/lockfile.ts` (prevents double-start).
-- **CLI** (`src/cli.ts`) — Ink client. Connects to daemon's Unix socket, sends user input, renders streaming LLM output + broadcast events (auto-trades, heartbeat, review). Auto-reconnects if daemon restarts.
-- **IPC** (`src/ipc/`) — JSONL over Unix-domain socket at `${XDG_RUNTIME_DIR || /tmp}/crypto-agent-${uid}.sock`. Override with `CRYPTO_AGENT_SOCK` env var. Protocol defined in `src/ipc/protocol.ts` as a discriminated union of `ClientMessage` / `ServerMessage`. Chat requests are cancellable: the client sends `cancel` for the request id, the server aborts the request's `AbortController`, and the provider stream is stopped.
+`crypto_agent/main.py` provides the executable entrypoint:
 
-### Two Execution Paths (inside the daemon)
+- `health` returns runtime and database metadata.
+- `init-db` creates or destructively recreates SQLite.
+- `smoke` runs a clean researcher-to-trader paper closure.
+- `daemon` starts `CryptoAgentIpcServer`.
 
-1. **LLM-driven** — Client sends `{type: "chat", session, content}` → daemon's `CryptoAgent.chatInSession()` runs the LLM loop → streaming `delta` / `tool_use` / `done` messages flow back over IPC.
+### LangGraph Agent Layer
 
-2. **Fast path** — Strategy objects evaluate ticks/candles with zero LLM latency. Pipeline: `MarketFeed` → `StrategyRuntime` / `Strategy` → `RiskGate` → `OrderExecutor`. Strategies are created by the LLM via `plan_strategy`, `plan_ladder_strategy`, or `plan_grid_strategy` tools but execute autonomously. Events from this path are broadcast as `{type: "event"}` to all attached CLIs.
+- `crypto_agent/agents/main_graph.py` handles a minimal main graph.
+- `crypto_agent/agents/researcher_graph.py` creates and validates strategy
+  packages, then verifies that the run left a durable outcome.
+- `crypto_agent/agents/trader_graph.py` inspects state, deploys a validated
+  package when present, sends an order through the risk gate, and verifies the
+  audit result.
+- `crypto_agent/agents/resident_runtime.py` persists resident agents and
+  `agent_runs`, then dispatches the correct graph.
 
-### Key Abstractions
+Graph nodes may call tools, but trading correctness must live in deterministic
+Python services, not in prompts.
 
-- **Tool registry** (`src/tools/registry.ts`): `registerTool(name, description, schema, deps, handler)` populates `TOOL_DEFINITIONS[]`, `TOOL_HANDLERS{}`, and `TOOL_DEPS{}`. Each tool declares its injected dependencies (e.g., `["exchange", "config", "memory"]`). `dispatchTool()` in `agent.ts` auto-resolves deps from a map — no per-tool if/else branching. New tools only need to declare deps, not modify the agent.
+### Tool Layer
 
-- **Exchange abstraction** (`src/exchange/base.ts`): `BaseExchange` interface with `LiveExchange` (CCXT wrapper) and `PaperExchange` (simulated fills, real market data). `ExchangeManager` holds a registry of named exchanges and an active pointer. Paper mode delegates price fetches to a real CCXT instance but simulates order fills in memory.
+`crypto_agent/tools/registry.py` registers tools and dispatches them with
+explicit dependency injection. Current tool modules:
 
-- **Soul** (`src/soul.ts`): Trading personality (conservative/balanced/aggressive) injected into the LLM system prompt. Soul numerical params (`max_position_pct`, `stop_loss_pct`) are **enforced in code** by `trade-guard.ts` — not just prompt suggestions. Switchable at runtime.
+- `crypto_agent/tools/strategy_tools.py`
+- `crypto_agent/tools/trading_tools.py`
 
-- **Trade guard** (`src/trade-guard.ts`): Unified risk gate for LLM-driven trades. `checkTradeAllowed()` enforces: max order size, soul position limits, 60% total exposure cap, 20% drawdown halt, and balance sufficiency. Called by buy/sell tool handlers before every order. Sells skip position/exposure checks (they reduce exposure).
+### Trading Layer
 
-- **Trade lock** (`src/trade-lock.ts`): Global `AsyncMutex` singleton (`tradeLock`) that serializes every risk-check + order-placement critical section. Both buy/sell tools (slow path) and `OrderExecutor.handleSignal()` + stop-loss/take-profit exits (fast path) acquire it via `withTradeLock(label, fn)`. Guarantees that concurrent sessions or LLM-vs-fast-path paths never race on the same account.
+- `crypto_agent/trading/paper_broker.py` is the authoritative paper execution
+  and accounting engine.
+- `crypto_agent/trading/risk_gate.py` enforces allocation, leverage, exposure,
+  and drawdown rules before orders are placed.
+- `crypto_agent/trading/order_executor.py` serializes risk check plus execution.
+- `crypto_agent/trading/live_exchange.py` wraps OKX swap order parameters for
+  live integration tests, but live trading must remain gated by a separate
+  readiness pass.
 
-- **World snapshot** (`src/world-snapshot.ts`): Builds a concise portfolio/positions/rules summary injected into the system prompt before each LLM call. Eliminates the need for the LLM to call `get_portfolio` at the start of every turn, reducing round-trips. Controlled by `WORLD_SNAPSHOT_ENABLED` config flag.
+### Backtest And Strategy Validation
 
-- **Strategy runtime** (`src/strategy/manager.ts`, `src/strategy/runtime.ts`, `src/strategy/base.ts`): `StrategyManager` persists polymorphic strategy snapshots and builds concrete `signal`, `ladder`, and `grid` strategies. `StrategyRuntime` starts/stops strategies, wires market subscriptions, forwards strategy signals to `OrderExecutor`, and routes fills back into strategy state.
+- `crypto_agent/backtest/engine.py` evaluates signal strategy packages over
+  candle data.
+- `crypto_agent/backtest/validators.py` stores strategy packages, validation
+  reports, and deployments.
 
-- **Shared evaluator** (`src/strategy/evaluator.ts`): Condition evaluation functions (`evalCondition`, `computeIndicatorValue`, `checkCross*`) used by both `SignalStrategy` (live) and `BacktestEngine` (historical). Ensures condition-based backtests match live execution. Supports indicator caching — `updateCachedIndicators()` computes RSI/SMA/Bollinger once per candle, tick evaluation uses cached values.
-
-- **Context compression** (`src/context.ts`): Two layers — micro-compact (client-side, replaces old tool results with placeholders) and auto-compact (LLM-generated summary when token estimate exceeds threshold).
-
-- **Sub-agents** (`src/sub-agents.ts`): Specialized roles (researcher/trader/risk_officer/strategist) with restricted tool subsets. The strategist role can run a longer research loop: search KB, gather market data, backtest, create or reject a strategy, and log the result.
-
-- **Strategies** (`src/strategy/`): `SignalStrategy` uses entry/exit `Condition[]` arrays (indicator + operator + value). `LadderStrategy` scales into positions across price levels and exits on combined weighted-average TP/SL. `GridStrategy` maintains long-only resting limit buys and follow-up sells across a configured range. The `backtest` tool supports `entry_conditions`/`exit_conditions` arrays that use the same evaluator as live signal strategies.
+Strategy deployment must be tied to a validation record. The current
+implementation covers signal strategies; grid/ladder parity can be added later
+in Python.
 
 ### Persistence
 
-SQLite via `better-sqlite3` (`src/memory.ts`). Tables include the original chat/trade/rule tables plus crash-recovery tables added in Iteration 11:
+SQLite schema is owned by `crypto_agent/db/schema.py`. The core identity and
+audit chain is:
 
-- `active_positions` — local SL/TP metadata for the fast-path executor. On startup, `OrderExecutor.restore()` reconciles with `exchange.fetchPositions()`.
-- `daily_pnl` — cumulative realized PnL per day; closes the "restart resets the daily-loss cap" loophole.
-- `pending_orders` — two-phase tracking for order placement; reconciled against `exchange.fetchOpenOrders()` on startup.
-- `portfolio_watermark` — peak portfolio value so drawdown is computed against the high-water mark, not the static initial balance.
-- `daemon_state` — KV store for `active_soul` / `active_exchange` / `active_user_session_id` so user-driven settings survive restart.
-- `strategies` — polymorphic strategy snapshots (`signal`, `ladder`, `grid`), replacing legacy rule-only storage.
-- `strategy_kb` — strategist research outcomes, including rejected hypotheses and failure reasons.
+```text
+funding_account
+  -> trading_account
+    -> trading_bot
+      -> bot_allocation
+        -> resident_agent
+          -> agent_run
+            -> strategy_package / strategy_validation / strategy_deployment
+            -> paper_order / paper_fill / paper_position / trade / risk_denial
+```
 
-Full design, including the items intentionally deferred to future iterations (A4 order-attempt ledger, B2–B6 observability), is in `docs/persistence.md`.
-
-### LLM Provider Abstraction
-
-`src/llm/provider.ts` exports kwargs builders for both OpenAI and Anthropic APIs. Provider selection is config-driven (`LLM_PROVIDER` env var). The agent class (`src/agent.ts`) maintains separate streaming methods: `streamOpenai()` and `streamAnthropic()`.
-
-### Daemon Extras
-
-- **Heartbeat** (`src/heartbeat.ts`): periodic LLM health-check loop (configurable interval)
-- **Cron jobs**: checked every 30s, executed via `agent.chatInSession()` on a system session
-- **Telegram notifications** (`src/notify.ts`): optional alerting
-- **Slash commands** (handled by daemon, invoked from CLI): `/new`, `/switch`, `/sessions`, `/compact`, `/trades`, `/rules`, `/budget`, `/risk`, `/engine`, `/research`, `/kb`. Implementations are in `CryptoDaemon.handleSlashCommand()` in `src/daemon.ts`.
-- **Event broadcast**: auto-trade entries/exits, heartbeat results, and trade reviews are pushed to all attached CLIs as `{type: "event"}` messages via `IpcServer.broadcast()`.
-
-## Configuration
-
-All config via `.env` (see `.env.example`). Key variables:
-- `LLM_PROVIDER` (openai/anthropic), `API_KEY`, `MODEL_ID`, `API_BASE_URL` (for third-party proxies)
-- `DEFAULT_EXCHANGE`, `EXCHANGE_API_KEY`, `EXCHANGE_SECRET`, `EXCHANGE_PASSWORD` (OKX passphrase)
-- `PAPER_TRADING` (true/false), `TRADING_SOUL` (conservative/balanced/aggressive)
-- `EXTRA_EXCHANGES` — JSON string for multi-exchange setup
-- `WORLD_SNAPSHOT_ENABLED` — inject current state into system prompt (default true)
-
-### IPC paths
-
-- Socket: `${XDG_RUNTIME_DIR || /tmp}/crypto-agent-${uid}.sock`
-- PID file: `${XDG_RUNTIME_DIR || /tmp}/crypto-agent-${uid}.pid`
-- Overrides: `CRYPTO_AGENT_SOCK`, `CRYPTO_AGENT_PID`, `CRYPTO_AGENT_RUNTIME_DIR`
+No backward database compatibility is required. For redeploys, a destructive DB
+reset is acceptable when the user asks for it.
 
 ## Conventions
 
-- ESM throughout (`"type": "module"` in package.json). All local imports use `.js` extensions.
-- Strict TypeScript. Target ES2022, module NodeNext.
-- Symbols always in `BASE/QUOTE` format (e.g., `BTC/USDT`).
-- Positions keyed as `symbol:side` to support hedge mode (dual-direction).
-- Skills (domain knowledge) are markdown files in `skills/*/SKILL.md` with YAML frontmatter.
-- Tests in `test/` directory, one test file per module. Tests use Vitest with no external services (paper exchange, in-memory SQLite).
+- Python 3.12+.
+- Tests live in `tests_py/` and use pytest.
+- Runtime package lives under `crypto_agent/`.
+- Resident profiles live under `agents/residents/*/AGENT.md`.
+- Do not add new TypeScript, npm, Vitest, Ink, or Node daemon code unless the
+  user explicitly asks to build a separate UI experiment.
+- Keep live exchange behavior behind deterministic gates. Paper mode must never
+  require private exchange keys.

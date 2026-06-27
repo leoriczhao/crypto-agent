@@ -1,354 +1,100 @@
 # Persistence Design
 
-This document captures the persistence strategy for `crypto-agent`, what's
-implemented, what's intentionally deferred, and the reasoning behind each
-decision.
+This document describes the current Python SQLite schema. The old TypeScript
+SQLite layer was removed. No old database compatibility is required.
 
 ## Principle
 
-A piece of state **must** be persisted iff losing it between crash and
-restart causes any of:
+Persist state when losing it would cause:
 
-1. Financial loss (forgotten stop-loss, duplicate order, missed exit)
-2. Audit / compliance gap (missing trade record)
-3. Risk control being bypassed (counters reset, limits forgotten)
-4. Severe user-experience regression (lost conversation, reverted setting)
+1. Financial loss.
+2. Missing audit evidence.
+3. Risk controls being bypassed.
+4. Resident-agent or strategy runs becoming impossible to trace.
 
-State that can be **rebuilt from external sources** (market data, exchange
-API) is explicitly NOT persisted.
+Market data can be cached later for research quality, but it is not the source
+of truth for account state. The current Python core keeps persistence focused on
+identity, strategies, paper execution, risk denials, and run audit.
 
-## What's stored (SQLite tables)
+## Schema Owner
 
-| Table | Purpose | Schema owner |
-|-------|---------|--------------|
-| `funding_accounts` | Capital owner / funding pool identity | `memory.ts` |
-| `trading_accounts` | Executable exchange account identity | `memory.ts` |
-| `trading_bots` | Trading bot identity bound to one trading account | `memory.ts` |
-| `sessions` | Conversation session metadata + bot binding | `session.ts` / `memory.ts` |
-| `conversations` | Chat history per session | `memory.ts` |
-| `trades` | Filled trade audit log + bot/account attribution | `memory.ts` |
-| `session_summaries` | Compacted context summaries | `memory.ts` |
-| `cron_jobs` | Recurring LLM tasks | `memory.ts` |
-| `events` | Generic event log | `memory.ts` |
-| `risk_params` | StrategyManager risk parameters | `memory.ts` |
-| `active_positions` (A0) | Fast-path positions + SL/TP + bot/account attribution | `memory.ts` / `executor.ts` |
-| `daily_pnl` (A1) | Realized PnL per day | `memory.ts` / `risk-gate.ts` |
-| `pending_orders` (A2) | Orders awaiting fill + bot/account attribution | `memory.ts` / buy & sell tools |
-| `portfolio_watermark` (A3) | Peak portfolio value for drawdown | `memory.ts` / `risk-gate.ts` |
-| `daemon_state` (B0) | KV for soul / exchange / session pointers | `memory.ts` / daemon & tools |
-| `strategies` (B1) | Polymorphic strategy snapshots (`signal`, `ladder`, `grid`) + bot/account attribution | `memory.ts` / `strategy/manager.ts` |
-| `strategy_kb` (C0) | Strategist research outcomes and failure reasons | `memory.ts` / KB tools |
-| `bot_allocations` | Paper bot wallet allocation and free/used/realized-PnL accounting | `memory.ts` / `broker/paper-broker.ts` |
-| `paper_orders` | Local paper order book and filled/cancelled paper order history | `memory.ts` / `broker/paper-broker.ts` |
-| `paper_positions` | Local paper spot/swap positions, margin, mark price, and unrealized PnL | `memory.ts` / `broker/paper-broker.ts` |
-| `paper_fills` | Paper fill audit log with actor, bot, and trading-account attribution | `memory.ts` / `broker/paper-broker.ts` |
-| `strategy_mandates` | Reusable strategy playbooks plus validation status | `memory.ts` / `tools/strategy-mandate.ts` |
-| `resident_agents` | Long-lived autonomous agents bound to a bot, account, allocation, and schedule | `memory.ts` / `agents/runtime.ts` |
-| `agent_mandate_assignments` | Active mandate-to-agent bindings and trading universe | `memory.ts` |
-| `agent_runs` | Per-wake execution records for resident agents | `memory.ts` / `agents/runtime.ts` |
-| `agent_events` | Resident agent lifecycle/run audit events | `memory.ts` / `agents/runtime.ts` |
+The schema lives in `crypto_agent/db/schema.py`. `crypto-agent-py init-db
+--destructive` drops and recreates all current tables.
 
-## Restart reconciliation flow
+## Tables
 
-1. `Memory` opens the SQLite DB (WAL mode is already on).
-2. `CryptoDaemon.constructor()` → `restoreDaemonState()` applies saved
-   `active_soul` / `active_exchange` / `active_user_session_id` from the
-   `daemon_state` KV.
-3. `ensureDefaultIdentity()` creates or refreshes the default funding account,
-   trading account, and bot for the active exchange/mode. It does not backfill
-   pre-existing unbound rows; callers must create sessions, strategies, orders,
-   and trades in the active identity context.
-4. In paper mode, `CryptoAgent.configurePaperBroker()` seeds the active bot's
-   USDT allocation if missing and creates a direct `PaperBroker` over public
-   `CcxtMarketDataProvider` data. Orders never leave the local SQLite-backed
-   paper broker.
-5. `StrategyManager.loadFromDb()` restores strategies + risk params.
-6. `startFastPath()` → `OrderExecutor.restore()` loads `active_positions`
-   and cross-checks with `broker.fetchPositions()` in paper mode or
-   `exchange.fetchPositions()` in live mode:
-   - **Match** → restore SL/TP into in-memory map.
-   - **Local record, no exchange position** → drop (stale).
-   - **Exchange position, no local record** → report as orphan; operator
-     decides.
-   - **Exchange unreachable** → keep local records; retry on the next
-     evaluate.
-7. `reconcilePendingOrders()` loads `status='open'` orders and compares
-   against `broker.fetchOpenOrders()` in paper mode or `exchange.fetchOpenOrders()`
-   in live mode. Missing IDs → mark `filled`.
-8. `HeartbeatScheduler.start()`.
-9. `cronLoop()` begins.
+| Table | Purpose |
+| --- | --- |
+| `funding_accounts` | Capital owner or funding pool identity. |
+| `trading_accounts` | Exchange and mode scope, linked to a funding account. |
+| `trading_bots` | Bot identity bound to one trading account. |
+| `bot_allocations` | Paper wallet capital, leverage cap, and position cap. |
+| `portfolio_watermarks` | Peak and current equity for drawdown enforcement. |
+| `resident_agents` | Long-lived researcher/trader/operator identities. |
+| `agent_runs` | Audited execution record for each resident wake. |
+| `strategy_packages` | Structured signal strategy package definitions. |
+| `strategy_validations` | Backtest validation reports and metrics. |
+| `strategy_deployments` | Deployment records for validated packages. |
+| `strategy_kb` | Durable researcher notes and outcomes. |
+| `paper_orders` | Local paper order history. |
+| `paper_fills` | Local paper fill audit log. |
+| `paper_positions` | Local paper position state and PnL. |
+| `risk_denials` | Deterministic RiskGate rejection records. |
+| `trades` | Closed or trade-level realized PnL audit. |
+| `daemon_state` | Small key/value runtime state. |
 
-## Implemented (Iteration 11)
+## Identity Chain
 
-### D0 — Account / bot / session identity
-The persistence model now separates:
+All trading-bearing records must connect back to this chain:
 
-- `funding_accounts` — capital owner / funding pool
-- `trading_accounts` — executable account scope (`exchange_id` + PAPER/LIVE mode)
-- `trading_bots` — bot bound to a trading account
-- `sessions.bot_id` — conversation context bound to a bot
-
-Trade-bearing tables (`trades`, `pending_orders`, `active_positions`, and
-`strategies`) carry `bot_id` and `trading_account_id` so audit rows are no
-longer implicitly tied to the daemon-global `active_exchange`.
-
-Current runtime scope is intentionally conservative: one daemon-active default
-bot. Multi-bot concurrent execution is not implemented here.
-
-### A0 — Active positions + SL/TP
-Without this, a daemon restart loses knowledge of where our stops sit. The
-exchange still holds the position, but the `OrderExecutor.monitorStopTakeProfit`
-tick handler has no target levels, so adverse moves are not closed
-automatically.
-
-### A1 — Daily realized PnL
-Closes the "restart resets the daily-loss cap" loophole. If a daemon crashes
-mid-day with -4% realized, a fresh instance used to see `dailyPnl = 0` and
-happily accept further losing trades until the full 5% cap was breached
-starting from scratch. Now the cap is honored across restarts.
-
-### A2 — Pending orders
-Two-phase tracking: `createPendingOrder(status='open')` before sending,
-`updatePendingOrder(status='filled')` after. On startup, the reconciliation
-step checks each pending row against the exchange's open-orders list and
-updates the status. Currently most orders are market-type (fill instantly),
-but limit orders are now also tracked.
-
-### A3 — Peak portfolio watermark
-Drawdown is computed against the **peak** value seen, not the
-config-declared initial balance. A $10k account that grew to $15k then
-retraced to $11k has a 26.7% drawdown — previously this would have shown as
-0% (since initial balance was $10k) and not triggered the 20% cap.
-
-### B0 — Daemon state KV
-Persists user-driven selections that env vars would otherwise overwrite on
-restart:
-- `active_soul` — survives `/switch_soul`
-- `active_exchange` — survives `/switch_exchange`
-- `active_user_session_id` — CLI reconnects to the right session
-- `active_funding_account_id` / `active_trading_account_id` / `active_bot_id`
-  — record the default identity selected for the active exchange
-
-Implemented as a generic `daemon_state (key, value)` table so new
-single-value state can be added without schema migrations.
-
-### B1 — Polymorphic strategies
-The `strategies` table stores `kind + params` snapshots for `signal`,
-`ladder`, and `grid` strategies. There is no legacy `strategy_rules` import path
-in the current schema.
-
-### B2 — Per-strategy budget isolation
-Strategy allocation lives on the `strategies` row. Runtime accounting combines
-`active_positions` and open `pending_orders` so a strategy cannot exceed its
-allocated USDT by stacking live positions or resting entry orders.
-
-### C0 — Strategy research KB
-The strategist sub-agent records adopted, rejected, and pending hypotheses in
-`strategy_kb`, including failure reasons. This makes failed research reusable
-instead of letting the LLM repeat the same weak ideas.
-
-### R0 — Resident agents and strategy mandates
-Resident agents are long-lived autonomous actors, not one-off delegated
-subtasks. The main human-facing agent can create a resident trader through the
-`resident_agent` tool, but the created trader gets its own `trading_bots` row
-and `bot_allocations` USDT wallet under the active trading account. This keeps
-the mapping explicit:
-
-`funding_account -> trading_account -> trading_bot -> resident_agent -> session`
-
-Trading mandates are separate reusable resources in `strategy_mandates`.
-Resident traders can only run with active mandate assignments; the wake-up
-schedule only decides when to run, not what strategy to use. Each wake creates
-an `agent_runs` row before the LLM is called, and paper orders, fills, and trade
-logs carry `agent_run_id`, `mandate_id`, and `capital_allocation_id` for audit.
-
-Mandates also carry `validation_status` and `validation_notes`. Current code
-records whether validation is deferred, pending, validated, or rejected, but it
-does not yet enforce a full backtest approval gate.
-
-### P0 — Persistent paper broker
-Paper mode now separates public market data from execution/accounting:
-
-- `CcxtMarketDataProvider` reads public ticker/OHLCV/orderbook data and does not
-  require exchange trading credentials.
-- `PaperBroker` owns local orders, balances, positions, fills, margin, and PnL.
-- `buy`, `sell`, `RiskGate`, `OrderExecutor`, and paper order reconciliation call
-  `PaperBroker` directly; market observation uses `MarketDataProvider`.
-
-The first contract model is intentionally narrow: USDT linear contracts. Paper
-mode simulates margin, fills, and PnL locally in SQLite. Live mode does not
-simulate execution; it passes swap order intent to the exchange with
-`marginMode`, `positionSide`, optional leverage, and `reduceOnly` for closes.
-`CONTRACT_POSITION_MODE=auto` detects OKX one-way vs long/short mode before
-live swap orders and maps `positionSide` to `net` or `long`/`short`
-accordingly; it does not call `setPositionMode()` or mutate exchange account
-configuration.
-Funding fees and exchange liquidation simulation are not implemented in paper
-mode.
-
-### P1 — Bot allocation and paper audit
-`bot_allocations` is the paper bot wallet. On first paper daemon startup, the
-active default bot gets `INITIAL_BALANCE_USDT`; existing rows are never reset on
-restart. Spot buys/sells update asset balances. Swap opens move USDT from
-`free` to `used` as margin; reduce-only closes release margin and apply realized
-PnL.
-
-`paper_orders` and `paper_fills` carry `actor_type`, `actor_id`, `bot_id`,
-`trading_account_id`, `agent_run_id`, `mandate_id`, and
-`capital_allocation_id`, so a direct session trade, a strategy fill, and a
-resident trader run can be audited without guessing from daemon-global state.
-
-## Deferred (explicitly NOT implemented yet)
-
-Each entry below has been considered and rejected for **this** iteration.
-Reasons and design sketches are preserved so we can pick them up later
-without re-deriving them.
-
-### A4 — Order-attempt ledger (two-phase commit)
-**What**: Record *intent to send* before `createOrder`, update to
-`sent` after the syscall, then `filled|failed` on response.
-
-**Why deferred**: `pending_orders` (A2) already covers most of the surface
-area. The remaining gap — crash between `createOrder` request and the
-network ack — is caught by `reconcilePendingOrders()` via exchange lookup.
-Adding an extra row for every order attempt doubles the write volume for
-marginal coverage.
-
-**When to revisit**: if we observe ambiguous cases in `pending_orders`
-where `status='unknown'` entries are hard to diagnose.
-
-**Sketch**:
-```
-CREATE TABLE order_attempts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT,
-  symbol TEXT NOT NULL,
-  side TEXT NOT NULL,
-  amount REAL NOT NULL,
-  price REAL,
-  status TEXT NOT NULL,  -- 'requested' | 'sent' | 'filled' | 'failed'
-  error TEXT,
-  related_trade_id INTEGER,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+```text
+funding_account
+  -> trading_account
+    -> trading_bot
+      -> bot_allocation
+        -> resident_agent
+          -> agent_run
+            -> strategy_package / strategy_validation / strategy_deployment
+            -> paper_order / paper_fill / paper_position / trade / risk_denial
 ```
 
-### R1 — Backtest approval platform for mandates
-**What**: A mandate validation platform that can take a researcher-created
-strategy mandate, run it through repeatable historical backtests / walk-forward
-checks, store the evidence, and optionally block assignment to live or paper
-traders unless the mandate is validated.
+The default seed rows are:
 
-**Why deferred**: The current repo has a lightweight `backtest` tool and shared
-condition evaluator, but not a mandate-level validation platform with datasets,
-approval records, replay reproducibility, or promotion rules. Adding that now
-would mix research governance into the trading execution refactor.
+- `funding-default`
+- `trading-paper-default`
+- `bot-default`
+- `allocation-default`
 
-**Current handling**: `strategy_mandates.validation_status` and
-`validation_notes` record the state explicitly. Researcher-created mandates
-should start as `draft` with `pending` or `deferred` validation. Trader runtime
-currently requires an assigned active mandate, but does not enforce historical
-backtest approval.
+The default allocation is 2,000 USDT, max leverage 3x, max position 30 percent.
 
-**When to revisit**: before allowing resident traders to promote researcher
-ideas into unattended live trading, or when mandate assignment needs an
-auditable approval workflow.
+## Paper Execution
 
-### B3 — TradeReviewer counter
-**What**: `tradesSinceLastReview` — the counter that triggers automatic LLM
-review every N trades.
+`PaperBroker` is the accounting authority in paper mode. It stores orders,
+fills, positions, realized PnL, and mark-to-market fields in SQLite. Paper mode
+must not use private exchange credentials.
 
-**Why deferred**: Data-loss impact is trivially small (next review is
-delayed by up to N-1 trades). Not a correctness or safety issue.
+## Risk Gate
 
-**Implementation**: would live in `daemon_state` as
-`trades_since_last_review`. Bump on trade, read on startup.
+`RiskGate` runs before `OrderExecutor` sends an order to the broker. It enforces:
 
-### B4 — Heartbeat last-run metadata
-**What**: Record the timestamp + textual result of the last heartbeat so
-`/engine` or a new `/health` command can show "last check N minutes ago,
-result: all clear".
+- Allocation existence.
+- Notional size relative to bot capital.
+- Leverage cap.
+- Position-size cap.
+- Portfolio drawdown halt.
 
-**Why deferred**: Purely observational. Currently the `events` table and
-journalctl cover the same information for operators willing to look.
+Rejected orders are persisted in `risk_denials`.
 
-**Implementation**: `daemon_state.last_heartbeat_at` + `.last_heartbeat_result`.
+## Strategy Validation
 
-### B5 — LLM usage / cost tracking
-**What**: Per-session token counts and cost estimates.
+`StrategyValidationService` creates strategy packages, validates them through
+the Python backtest layer, stores reports, and only deploys packages with a
+passed validation. The first implementation covers signal strategies.
 
-**Why deferred**: Operationally useful but not correctness-critical. All
-three Claude/OpenAI responses include `usage.input_tokens` /
-`usage.output_tokens`, so retrofitting is straightforward.
+## Restart Behavior
 
-**Sketch**:
-```
-CREATE TABLE llm_usage (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT,
-  model TEXT,
-  input_tokens INTEGER NOT NULL,
-  output_tokens INTEGER NOT NULL,
-  cost_usd REAL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### B6 — Expanded event log
-**What**: Record every slash command, every IPC client connect/disconnect,
-every RiskGate decision (approved + rejected).
-
-**Why deferred**: We already write `events` for high-signal items
-(rejections, errors). Expanding without a UI to browse them is noise.
-
-**When to revisit**: when we build a "history" view or a compliance export
-feature.
-
-### B7 — World snapshot history
-**What**: Save the world-state snapshot the LLM sees at every invocation,
-for post-hoc "why did it decide X?" analysis.
-
-**Why deferred**: The snapshot is derived; storage grows linearly with
-usage. For the current scale it's easier to re-run the query on historical
-data if needed.
-
-**Implementation when needed**:
-```
-CREATE TABLE world_snapshots (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
-  content TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-Sampling frequency should be configurable — every-call is overkill for
-most workflows.
-
-## Intentionally NOT persisted
-
-- `SignalStrategy` indicator caches — rebuilt in ~1s from
-  `exchange.fetchOhlcv(..., 100)` on startup.
-- `MarketFeed` subscriptions — recreated from active rules + restored
-  positions.
-- IPC client connections — clients auto-reconnect.
-- In-flight LLM streams — caller sees an error on restart, retries.
-- `Notifier` send history — idempotency would require exchange-side
-  deduplication; not worth the complexity.
-- Skill file contents — loaded from disk on demand.
-
-## Invariants to preserve
-
-1. **Exchange state is source of truth** for positions and open orders.
-   Local tables carry *metadata* (SL/TP, session attribution) that the
-   exchange doesn't know about. Reconciliation always prefers the
-   exchange's view.
-2. **Transactional writes for coupled state**. Position-creation logs
-   a `trades` row AND a `pending_orders` row AND an `active_positions`
-   row — future refactors should consider wrapping such multi-write
-   sequences in a single SQLite transaction once the volume justifies it.
-3. **UPSERT over blind INSERT** for singleton rows (`portfolio_watermark`,
-   `daemon_state`, `daily_pnl`) so restarts don't fail on unique-key
-   collisions.
-4. **WAL mode stays on** (`journal_mode = WAL` in `memory.ts`). This is
-   what makes the crash-safety guarantees above meaningful.
+The Python daemon initializes the schema on startup when launched with
+`--init-db`. Existing data is preserved unless `--destructive` is explicitly
+passed. Resident agents, packages, validations, deployments, paper positions,
+fills, trades, and risk denials are stored in SQLite and survive normal daemon
+restarts.
