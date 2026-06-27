@@ -11,4 +11,4 @@ COPY agents ./agents
 
 RUN pip install --no-cache-dir .
 
-CMD ["crypto-agent-py", "daemon", "--database-path", "/data/crypto_agent.db", "--socket-path", "/run/crypto-agent/crypto-agent.sock", "--environment", "production", "--init-db"]
+CMD ["crypto-agent-py", "daemon", "--database-path", "/data/crypto_agent.db", "--socket-path", "/run/crypto-agent/crypto-agent.sock", "--init-db"]

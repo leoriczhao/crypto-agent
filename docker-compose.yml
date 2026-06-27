@@ -10,17 +10,32 @@ services:
     env_file:
       - .env
     environment:
-      NODE_ENV: production
+      CRYPTO_AGENT_ENV: production
+      HOME: /data
       MEMORY_DB_PATH: /data/crypto_agent.db
-      AUTO_COMPACT_TRANSCRIPT_DIR: /data/transcripts
-      CRYPTO_AGENT_RUNTIME_DIR: /run/crypto-agent
       CRYPTO_AGENT_SOCK: /run/crypto-agent/crypto-agent.sock
-      CRYPTO_AGENT_PID: /run/crypto-agent/crypto-agent.pid
     volumes:
       - ./data:/data
       - ./runtime:/run/crypto-agent
+    command:
+      - crypto-agent-py
+      - daemon
+      - --database-path
+      - /data/crypto_agent.db
+      - --socket-path
+      - /run/crypto-agent/crypto-agent.sock
+      - --environment
+      - production
+      - --init-db
     healthcheck:
-      test: ["CMD-SHELL", "test -S /run/crypto-agent/crypto-agent.sock && test -f /run/crypto-agent/crypto-agent.pid"]
+      test:
+        [
+          "CMD",
+          "crypto-agent-py-client",
+          "--socket-path",
+          "/run/crypto-agent/crypto-agent.sock",
+          "health",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3

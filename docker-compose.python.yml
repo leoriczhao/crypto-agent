@@ -1,0 +1,23 @@
+services:
+  crypto-agent-python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    image: crypto-agent-python:dev
+    container_name: crypto-agent-python
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      CRYPTO_AGENT_ENV: production
+      MEMORY_DB_PATH: /data/crypto_agent.db
+    volumes:
+      - ./data:/data
+      - ./runtime:/run/crypto-agent
+    command: ["crypto-agent-py", "daemon", "--database-path", "/data/crypto_agent.db", "--socket-path", "/run/crypto-agent/crypto-agent.sock", "--environment", "production", "--init-db"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/crypto-agent/crypto-agent.sock"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
